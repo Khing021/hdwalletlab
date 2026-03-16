@@ -4,6 +4,8 @@
 
 โครงการนี้สร้างขึ้นเพื่อให้ผู้ใช้เข้าใจขั้นตอนทางคริปโตกราฟีอย่างละเอียด เช่น BIP39 (Mnemonic), BIP32/BIP44/BIP84 (Derivation Paths) และการคำนวณ Hash ต่างๆ ผ่านการลงมือทำจริงด้วยเครื่องมือในตัว
 
+ผลงานนี้เป็นส่วนหนึ่งของการทดลองแบบ **Vibe Coding**
+
 ## คุณสมบัติหลัก
 - การสร้างความสุ่ม (Entropy) และการเปลี่ยนเป็น Mnemonic 12 คำ
 - การคำนวณ Seed จาก Mnemonic และ Passphrase
@@ -21,6 +23,8 @@
 An interactive laboratory for learning the internal mechanics of Hierarchical Deterministic (HD) Wallets, from generating Entropy to deriving Bitcoin addresses.
 
 This project is designed to help users understand cryptographic processes in detail, including BIP39 (Mnemonic), BIP32/BIP44/BIP84 (Derivation Paths), and various hash calculations through hands-on experience using built-in tools.
+
+This project is a product of **Vibe Coding** experimentation.
 
 ## Key Features
 - Entropy generation and mapping to 12-word Mnemonics
