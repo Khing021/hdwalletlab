@@ -72,12 +72,56 @@ function App() {
   const [bip84Address, setBip84Address] = useState('');
   const [addrInput, setAddrInput] = useState('');
   const [bit132Input, setBit132Input] = useState('');
+  const [tapXOnlyInput, setTapXOnlyInput] = useState('');
+  const [tapTweakHashInput, setTapTweakHashInput] = useState('');
+  const [tapTweakPointInput, setTapTweakPointInput] = useState('');
+  const [tapSubStep, setTapSubStep] = useState(1);
+
+  const addressType = useMemo(() => {
+    if (derivationPath.startsWith("m/44'")) return 'legacy';
+    if (derivationPath.startsWith("m/49'")) return 'nested';
+    if (derivationPath.startsWith("m/84'")) return 'native';
+    if (derivationPath.startsWith("m/86'")) return 'taproot';
+    return 'native';
+  }, [derivationPath]);
+
+  const pathDetails = useMemo(() => {
+    try {
+      const parts = derivationPath.split('/').slice(1);
+      return parts.map(part => {
+        const hardened = part.endsWith("'");
+        const indexVal = parseInt(part.replace("'", ""));
+        const hex = (hardened ? indexVal + 0x80000000 : indexVal).toString(16).padStart(8, '0');
+        return { label: part, hex, indexVal, hardened };
+      });
+    } catch (e) {
+      return [];
+    }
+  }, [derivationPath]);
+
+  const taprootDeconstruction = useMemo(() => {
+    if (addressType !== 'taproot' || childKeys.length === 0) return null;
+    try {
+      const internalPub = cryptoUtils.ecMultiply(childKeys[childKeys.length - 1].priv);
+      const xOnly = internalPub.slice(2);
+      const tweakHash = cryptoUtils.taggedHash("TapTweak", hexToBytes(xOnly));
+      const tweakPoint = cryptoUtils.ecMultiply(tweakHash);
+      const evenPub = '02' + xOnly; // BIP341: Taproot tweak must be added to a point with an even Y coordinate
+      const outputKey = cryptoUtils.ecAdd(evenPub, tweakPoint);
+      return { internalPub, xOnly, tweakHash, tweakPoint, outputKey };
+    } catch (e) {
+      return null;
+    }
+  }, [addressType, childKeys]);
 
   const randomizePath = () => {
+    const purposes = ["44'", "49'", "84'", "86'"];
+    const purpose = purposes[Math.floor(Math.random() * purposes.length)];
     const x1 = Math.floor(Math.random() * 100);
     const x2 = Math.floor(Math.random() * 2); // Only 0 or 1
     const x3 = Math.floor(Math.random() * 1000);
-    setDerivationPath(`m/84'/0'/${x1}'/${x2}/${x3}`);
+    setDerivationPath(`m/${purpose}/0'/${x1}'/${x2}/${x3}`);
+    setTapSubStep(1);
     if (step > 6) setStep(6);
   };
 
@@ -113,13 +157,21 @@ function App() {
         }
         setChildKeys(intermediate);
 
-        // Final address from the last intermediate key
+        // Final address calculation based on detected type
         if (intermediate.length > 0) {
           const finalPriv = intermediate[intermediate.length - 1].priv;
           const pubKeyHex = cryptoUtils.ecMultiply(finalPriv);
-          const pubKeyBytes = hexToBytes(pubKeyHex);
-          const hash160 = cryptoUtils.hash160(pubKeyBytes);
-          const addr = cryptoUtils.bech32("bc", hexToBytes(hash160), 0);
+          
+          let addr = '';
+          if (addressType === 'legacy') {
+            addr = cryptoUtils.p2pkh(pubKeyHex);
+          } else if (addressType === 'nested') {
+            addr = cryptoUtils.p2sh_p2wpkh(pubKeyHex);
+          } else if (addressType === 'native') {
+            addr = cryptoUtils.bech32("bc", hexToBytes(cryptoUtils.hash160(hexToBytes(pubKeyHex))), 0);
+          } else if (addressType === 'taproot') {
+            addr = cryptoUtils.p2tr(pubKeyHex);
+          }
           setBip84Address(addr);
         }
       } catch (e) {
@@ -162,9 +214,20 @@ function App() {
               <div className="space-y-4">
                 <div className="flex flex-col gap-2">
                   <label className="text-[10px] font-black tracking-[0.2em] text-gray-400 px-1">Raw Binary (128 Bits)</label>
-                  <div className="font-mono text-[10px] md:text-xs p-6 bg-gray-50 dark:bg-gray-900/80 rounded-3xl break-all border border-gray-200 dark:border-gray-800 leading-relaxed shadow-inner min-h-[80px] flex items-center justify-center text-gray-500 italic">
-                    {entropyBinary || "Click Generate Entropy below to start..."}
-                  </div>
+                  <textarea 
+                    value={entropyBinary}
+                    onChange={(e) => {
+                      const val = e.target.value.replace(/[^01]/g, '');
+                      setEntropyBinary(val);
+                      if (val.length >= 128) setStep(2);
+                    }}
+                    placeholder="Click Generate Entropy below or type 128 bits of 0s and 1s here..."
+                    className={`font-mono text-[10px] md:text-xs p-6 bg-gray-50 dark:bg-gray-900/80 rounded-3xl break-all border-2 leading-relaxed shadow-inner min-h-[80px] w-full outline-none transition-all resize-none ${
+                        entropyBinary && (entropyBinary.length === 128 || entropyBinary.length === 256) 
+                          ? 'border-green-500/50 text-black dark:text-white' 
+                          : 'border-gray-200 dark:border-gray-800 text-gray-500 focus:border-blue-500/30'
+                    }`}
+                  />
                 </div>
 
                 <div className="flex flex-col sm:flex-row items-center justify-end mt-4">
@@ -172,7 +235,7 @@ function App() {
                     onClick={generateEntropy}
                     className="px-10 py-5 bg-blue-600 text-white rounded-3xl font-black shadow-xl shadow-blue-500/20 hover:bg-blue-700 active:scale-95 transition-all text-sm uppercase tracking-widest"
                   >
-                    Generate Entropy
+                    Generate Random
                   </button>
                 </div>
               </div>
@@ -454,11 +517,17 @@ function App() {
             isActive={step === 6} 
             isLocked={step < 6}
             isCompleted={step > 6}
-            hint="กดปุ่ม RANDOM เพื่อสุ่มเส้นทาง หรือกำหนดเองตามรูปแบบ m/84'/0'/account'/change/index"
+            hint="สุ่มเส้นทาง (BIP44, 49, 84, 86) หรือกำหนดเองตามรูปแบบ m/purpose'/coin'/account'/change/index"
           >
             <div className="space-y-6">
               <p className="text-gray-500 dark:text-gray-400 leading-relaxed text-sm">
-                เลือกกระเป๋าที่คุณต้องการสร้าง! สำหรับ Bitcoin Native SegWit มาตรฐานคือ <span className="font-bold underline text-blue-500">m/84'/0'/...</span> (BIP84)
+                เลือกประเภทกระเป๋าที่ต้องการสร้าง: 
+                <span className="block mt-2 font-mono text-xs">
+                  • <span className="text-blue-500">m/44'</span> (Legacy), 
+                  • <span className="text-blue-500">m/49'</span> (Nested SegWit), 
+                  • <span className="text-blue-500">m/84'</span> (Native SegWit), 
+                  • <span className="text-blue-500">m/86'</span> (Taproot)
+                </span>
               </p>
               
               <div className="flex flex-col sm:flex-row gap-4">
@@ -467,12 +536,20 @@ function App() {
                     type="text" 
                     value={derivationPath}
                     onChange={(e) => {
-                      const val = e.target.value;
-                      if (val.startsWith("m/84'/0'/")) {
-                        setDerivationPath(val);
+                      const val = e.target.value.trim();
+                      setDerivationPath(val);
+                      setTapSubStep(1);
+                      setStep(6);
+                  
+                      // Auto-validate BIP32 format: m/purpose'/coin'/account'/change/index
+                      const pathRegex = /^m(\/\d+'?){5}$/;
+                      if (pathRegex.test(val)) {
+                        setStep(7);
                       }
                     }}
-                    className="w-full bg-white dark:bg-black border-2 border-gray-200 dark:border-gray-800 focus:border-blue-500/30 rounded-2xl p-4 font-mono text-sm outline-none transition-all shadow-inner text-black dark:text-white"
+                    className={`w-full bg-white dark:bg-black border-2 rounded-2xl p-4 font-mono text-sm outline-none transition-all shadow-inner text-black dark:text-white ${
+                      /^m(\/\d+'?){5}$/.test(derivationPath) ? 'border-green-500/50' : 'border-gray-200 dark:border-gray-800 focus:border-blue-500/30'
+                    }`}
                   />
                   <button 
                     onClick={randomizePath}
@@ -501,20 +578,20 @@ function App() {
               isLocked={step < (7 + i)}
               isCompleted={step > (7 + i)}
               hint={
-                i === 0 ? `Hardened Derivation (m/84'): 1. ใช้ HMAC-SHA512 (Key=Root CC, Data=0x00+Root Priv+80000054) 2. แบ่งครึ่งผลลัพธ์: ครึ่งหลังคือ Chain Code ใหม่, ครึ่งแรกคือ IL. 3. นำ IL และ Root Priv ไปบวกกันในเครื่องมือ BigInt Add (Mod N) เพื่อให้ได้ Private Key ใหม่` :
-                i === 1 ? `Hardened Derivation (m/84'/0'): 1. ใช้ HMAC-SHA512 (Key=CC ด่าน 7, Data=0x00+Priv ด่าน 7+80000000) 2. แบ่งครึ่ง: ครึ่งหลัง=CC ใหม่, ครึ่งแรก=IL. 3. นำ IL + Priv ด่าน 7 ใน BigInt Add เพื่อให้ได้ Private Key ใหม่` :
-                i === 2 ? `Hardened Derivation (Account): 1. ใช้ HMAC-SHA512 (Key=CC ด่าน 8, Data=0x00+Priv ด่าน 8+[Path Index แบบ Hex]) 2. แบ่งครึ่ง: ครึ่งหลัง=CC, ครึ่งแรก=IL. 3. นำ IL + Priv ด่าน 8 ใน BigInt Add เพื่อหา Private Key` :
-                i === 3 ? `Normal Derivation (Change): 1. หา Public Key ของด่าน 9 โดยใช้เครื่องมือ EC-Multiply (ใส่ Priv ด่าน 9 ในช่อง Data) 2. ใช้ HMAC-SHA512 (Key=CC ด่าน 9, Data=Pubkey ด่าน 9 + [Index 00000000]) 3. แบ่งครึ่งหา CC และ IL 4. นำ IL + Priv ด่าน 9 ใน BigInt Add` :
-                `Normal Derivation (Index): 1. หา Public Key ของด่าน 10 โดยใช้เครื่องมือ EC-Multiply (ใส่ Priv ด่าน 10 ในช่อง Data) 2. ใช้ HMAC-SHA512 (Key=CC ด่าน 10, Data=Pubkey ด่าน 10 + [Index แบบ Hex]) 3. แบ่งครึ่งหา CC และ IL 4. นำ IL + Priv ด่าน 10 ใน BigInt Add`
+                i === 0 ? `Hardened Derivation (${key.label}): 1. ใช้ HMAC-SHA512 (Key=Root CC, Data=0x00 + Root Priv + ${pathDetails[0]?.hex || '...'}) 2. แบ่งครึ่งผลลัพธ์: ครึ่งแรก=IL, ครึ่งหลัง=CC ใหม่ 3. นำ IL + Root Priv ใน BigInt Add เพื่อหา Private Key` :
+                i === 1 ? `Hardened Derivation (${key.label}): 1. ใช้ HMAC-SHA512 (Key=CC ด่าน 7, Data=0x00 + Priv ด่าน 7 + ${pathDetails[1]?.hex || '...'}) 2. แบ่งครึ่งผลลัพธ์: ครึ่งแรก=IL, ครึ่งหลัง=CC ใหม่ 3. นำ IL + Priv ด่าน 7 ใน BigInt Add เพื่อหา Private Key` :
+                i === 2 ? `Hardened Derivation (${key.label}): 1. ใช้ HMAC-SHA512 (Key=CC ด่าน 8, Data=0x00 + Priv ด่าน 8 + ${pathDetails[2]?.hex || '...'}) 2. แบ่งครึ่งผลลัพธ์: ครึ่งแรก=IL, ครึ่งหลัง=CC ใหม่ 3. นำ IL + Priv ด่าน 8 ใน BigInt Add เพื่อหา Private Key` :
+                i === 3 ? `Normal Derivation (${key.label}): 1. หา Public Key ของด่าน 9 (EC-Multiply) 2. ใช้ HMAC-SHA512 (Key=CC ด่าน 9, Data=PubKey ด่าน 9 + ${pathDetails[3]?.hex || '...'}) 3. แบ่งครึ่งหา IL/CC 4. นำ IL + Priv ด่าน 9 ใน BigInt Add` :
+                `Normal Derivation (${key.label}): 1. หา Public Key ของด่าน 10 (EC-Multiply) 2. ใช้ HMAC-SHA512 (Key=CC ด่าน 10, Data=PubKey ด่าน 10 + ${pathDetails[4]?.hex || '...'}) 3. แบ่งครึ่งหา IL/CC 4. นำ IL + Priv ด่าน 10 ใน BigInt Add`
               }
             >
               <div className="space-y-6">
                 <p className="text-gray-500 dark:text-gray-400 leading-relaxed text-sm">
-                  {i === 0 ? "คำนวณกุญแจสำหรับระดับแรก (Purpose) เพื่อระบุกระเป๋าประเภท Native SegWit" :
+                  {i === 0 ? `คำนวณกุญแจสำหรับระดับแรก (Purpose) เพื่อระบุกระเป๋ารูปแบบ ${addressType.toUpperCase()}` :
                    i === 1 ? "คำนวณกุญแจระดับที่สอง (Coin Type) เพื่อระบุว่าเป็นเหรียญ Bitcoin" :
                    i === 2 ? "คำนวณกุญแจระดับที่สาม (Account) เพื่อแยกจัดการบัญชีภายในกระเป๋า" :
                    i === 3 ? "แยกแยะระหว่างกุญแจสำหรับรับเงิน (External) หรือกุญแจสำหรับเงินทอน (Internal)" :
-                   "คำนวณกุญแจสำหรับที่อยู่ (Address) ลำดับสุดท้ายที่จะนำไปสร้างเลขบัญชี"}
+                   "คำนวณกุญแจสำหรับลำดับสุดท้าย (Index) ที่จะนำไปใช้สร้างที่อยู่เป็นลำดับสุดท้าย"}
                 </p>
                 <div className="grid grid-cols-1 gap-6">
                   <div className="flex flex-col gap-2">
@@ -589,10 +666,11 @@ function App() {
                   value={pubKeyInput}
                   onChange={(e) => {
                     const val = e.target.value.trim().toLowerCase();
-                    const expectedPub = cryptoUtils.ecMultiply(childKeys[childKeys.length - 1].priv);
+                    const finalKey = childKeys[childKeys.length - 1];
+                    const expectedPub = finalKey ? cryptoUtils.ecMultiply(finalKey.priv) : "";
                     const finalVal = val === '///' ? expectedPub : val;
                     setPubKeyInput(finalVal);
-                    if (finalVal === expectedPub) setStep(13);
+                    if (finalVal === expectedPub && expectedPub !== "") setStep(13);
                   }}
                   className={`w-full bg-white dark:bg-black border-2 rounded-2xl p-4 font-mono text-xs outline-none transition-all shadow-inner text-black dark:text-white h-16 resize-none break-all ${
                     pubKeyInput ? 'border-green-500/50' : 'border-gray-200 dark:border-gray-800 focus:border-blue-500/30'
@@ -604,48 +682,174 @@ function App() {
             </div>
           </StepCard>
 
-          {/* Step 13: Public Key to Payload (HASH160) */}
-          <StepCard 
-            number="13" 
-            title="Public Key to Payload" 
-            isActive={step === 13} 
-            isLocked={step < 13}
-            isCompleted={step > 13}
-            hint="ใช้เครื่องมือ HASH-160 โดยใส่ Public Key (Hex) จากด่านที่แล้วลงในช่อง Data"
-          >
-            <div className="space-y-6">
-              <p className="text-gray-500 dark:text-gray-400 leading-relaxed text-sm">
-                ลดขนาดกุญแจสาธารณะให้อยู่ในรูปแบบที่พร้อมสำหรับสร้างเป็นที่อยู่กระเป๋าเงิน (Payload)
-              </p>
-              <div className="relative">
-                <textarea 
-                  value={payloadInput}
-                  onChange={(e) => {
-                    const val = e.target.value.trim().toLowerCase();
-                    const pub = cryptoUtils.ecMultiply(childKeys[childKeys.length - 1].priv);
-                    const expectedPayload = cryptoUtils.hash160(hexToBytes(pub));
-                    const finalVal = val === '///' ? expectedPayload : val;
-                    setPayloadInput(finalVal);
-                    if (finalVal === expectedPayload) setStep(14);
-                  }}
-                  className={`w-full bg-white dark:bg-black border-2 rounded-2xl p-4 font-mono text-xs outline-none transition-all shadow-inner text-black dark:text-white h-16 resize-none break-all ${
-                    payloadInput ? 'border-green-500/50' : 'border-gray-200 dark:border-gray-800 focus:border-blue-500/30'
-                  }`}
-                  placeholder="Enter 20-byte Payload Hex..."
-                />
-                {step > 13 && <div className="absolute right-4 top-4 text-green-500">✓</div>}
-              </div>
-            </div>
-          </StepCard>
+          {addressType === 'taproot' ? (
+            <>
+              {/* Step 13.1: Tagged Hash */}
+              <StepCard 
+                number="13.1" 
+                title="Tweak Hash (Tagged)" 
+                isActive={step === 13 && tapSubStep === 1} 
+                isLocked={step < 13}
+                isCompleted={step > 13 || (step === 13 && tapSubStep > 1)}
+                hint="ใช้เครื่องมือ Tagged Hash ใน Toolbox: 1. Tag = TapTweak, 2. Data = นำ Internal Public Key (ด่าน 12) ตัด 2 ตัวหน้า (02/03) ทิ้งเหลือแค่ X-Only (พิกัด X ความยาว 64 ตัวอักษร)"
+              >
+                <div className="space-y-4">
+                  <p className="text-sm text-gray-500">คำนวณค่า Scalar สำหรับปรับแต่งกุญแจตามมาตรฐาน BIP340</p>
+                  <div className="relative">
+                    <textarea 
+                      value={tapTweakHashInput}
+                      onChange={(e) => {
+                        const val = e.target.value.trim().toLowerCase();
+                        const expected = taprootDeconstruction?.tweakHash;
+                        const finalVal = val === '///' ? expected : val;
+                        setTapTweakHashInput(finalVal);
+                        if (finalVal === expected) setTapSubStep(2);
+                      }}
+                      className={`w-full bg-white dark:bg-black border-2 rounded-2xl p-4 font-mono text-xs outline-none transition-all ${
+                        tapTweakHashInput === taprootDeconstruction?.tweakHash ? 'border-green-500/50' : 'border-gray-200 dark:border-gray-800'
+                      }`}
+                      placeholder="Enter Tweak Hash Hex..."
+                    />
+                  </div>
+                </div>
+              </StepCard>
 
-          {/* Step 14: Final Bech32 Encoding */}
+              {/* Step 13.2: Tweak Point */}
+              <StepCard 
+                number="13.2" 
+                title="Tweak Point (EC-Mul)" 
+                isActive={step === 13 && tapSubStep === 2} 
+                isLocked={step < 13 || (step === 13 && tapSubStep < 2)}
+                isCompleted={step > 13 || (step === 13 && tapSubStep > 2)}
+                hint="ใช้เครื่องมือ EC-Multiply: นำ Tweak Hash (ด่านก่อนหน้า) มาหา Public Key ที่สัมพันธ์กัน"
+              >
+                <div className="space-y-4">
+                  <p className="text-sm text-gray-500">แปลงค่า Scalar ให้กลายเป็นพิกัดบนเส้นโค้ง (Point) เพื่อนำไปบวก</p>
+                  <div className="relative">
+                    <textarea 
+                      value={tapTweakPointInput}
+                      onChange={(e) => {
+                        const val = e.target.value.trim().toLowerCase();
+                        const expected = taprootDeconstruction?.tweakPoint;
+                        const finalVal = val === '///' ? expected : val;
+                        setTapTweakPointInput(finalVal);
+                        if (finalVal === expected) setTapSubStep(3);
+                      }}
+                      className={`w-full bg-white dark:bg-black border-2 rounded-2xl p-4 font-mono text-xs outline-none transition-all ${
+                        tapTweakPointInput === taprootDeconstruction?.tweakPoint ? 'border-green-500/50' : 'border-gray-200 dark:border-gray-800'
+                      }`}
+                      placeholder="Enter Tweak Point Hex..."
+                    />
+                  </div>
+                </div>
+              </StepCard>
+
+              {/* Step 13.3: Final Tweak (Point Add) */}
+              <StepCard 
+                number="13.3" 
+                title="Output Key (Point-Add)" 
+                isActive={step === 13 && tapSubStep === 3} 
+                isLocked={step < 13 || (step === 13 && tapSubStep < 3)}
+                isCompleted={step > 13}
+                hint="ใช้เครื่องมือ EC-Point-Add: บวกกุญแจใบที่ 1 (Internal PubKey ด่าน 12 โดยเปลี่ยน 2 ตัวแรกให้เป็น '02' เสมอ) เข้ากับกุญแจใบที่ 2 (Tweak Point ด่าน 13.2)"
+              >
+                <div className="space-y-4">
+                  <p className="text-sm text-gray-500">รวมกุญแจเดิมเข้ากับค่าปรับแต่งเพื่อให้ได้ Output Key (ต้องมั่นใจว่ากุญแจเดิมมีค่า Y เป็นคู่ หรือขึ้นต้นด้วย 02)</p>
+                  <div className="relative">
+                    <textarea 
+                      value={payloadInput}
+                      onChange={(e) => {
+                        const val = e.target.value.trim().toLowerCase();
+                        const expected = taprootDeconstruction?.outputKey;
+                        const finalVal = val === '///' ? expected : val;
+                        setPayloadInput(finalVal);
+                        if (finalVal === expected) setStep(14);
+                      }}
+                      className={`w-full bg-white dark:bg-black border-2 rounded-2xl p-4 font-mono text-xs outline-none transition-all ${
+                        payloadInput === taprootDeconstruction?.outputKey ? 'border-green-500/50' : 'border-gray-200 dark:border-gray-800'
+                      }`}
+                      placeholder="Enter Final Output Key Hex..."
+                    />
+                  </div>
+                </div>
+              </StepCard>
+            </>
+          ) : (
+            /* Step 13: Payload Calculation (Legacy/SegWit) */
+            <StepCard 
+              number="13" 
+              title={
+                addressType === 'legacy' ? "Public Key to Payload (HASH160)" :
+                addressType === 'nested' ? "Public Key to P2SH Payload" :
+                "Public Key to Payload (HASH160)"
+              }
+              isActive={step === 13} 
+              isLocked={step < 13}
+              isCompleted={step > 13}
+              hint={
+                addressType === 'legacy' ? "ใช้เครื่องมือ HASH-160 โดยใส่ Public Key (Hex) จากด่านที่แล้วลงในช่อง Data" :
+                addressType === 'nested' ? "1. นำ HASH160 ของ PubKey มาสร้าง Witness Script (0014...) 2. นำ Hex นั้นไปเข้า HASH160 อีกรอบเพื่อให้ได้ Payload" :
+                "ใช้เครื่องมือ HASH-160 โดยใส่ Public Key (Hex) จากด่านที่แล้วลงในช่อง Data"
+              }
+            >
+              <div className="space-y-6">
+                <p className="text-gray-500 dark:text-gray-400 leading-relaxed text-sm">
+                  ลดขนาดกุญแจสาธารณะให้อยู่ในรูปแบบที่พร้อมสำหรับสร้างเป็นที่อยู่กระเป๋าเงิน (Payload)
+                </p>
+                {(() => {
+                  let expected = "";
+                  try {
+                    const finalKey = childKeys[childKeys.length - 1];
+                    if (finalKey) {
+                      const pub = cryptoUtils.ecMultiply(finalKey.priv);
+                      if (addressType === 'legacy' || addressType === 'native') {
+                        expected = cryptoUtils.hash160(hexToBytes(pub));
+                      } else if (addressType === 'nested') {
+                        const pubHash = cryptoUtils.hash160(hexToBytes(pub));
+                        const witnessProgram = "0014" + pubHash;
+                        expected = cryptoUtils.hash160(hexToBytes(witnessProgram));
+                      }
+                    }
+                  } catch (e) {}
+
+                  return (
+                    <div className="relative">
+                      <textarea 
+                        value={payloadInput}
+                        onChange={(e) => {
+                          const val = e.target.value.trim().toLowerCase();
+                          const finalVal = val === '///' ? expected : val;
+                          setPayloadInput(finalVal);
+                          if (finalVal === expected && expected !== "") {
+                            setStep(14);
+                          }
+                        }}
+                        className={`w-full bg-white dark:bg-black border-2 rounded-2xl p-4 font-mono text-xs outline-none transition-all shadow-inner text-black dark:text-white h-16 resize-none break-all ${
+                          payloadInput === expected && expected !== "" ? 'border-green-500/50' : 'border-gray-200 dark:border-gray-800 focus:border-blue-500/30'
+                        }`}
+                        placeholder="Enter 20-byte Payload Hex..."
+                      />
+                      {(step > 13 || (payloadInput === expected && expected !== "")) && <div className="absolute right-4 top-4 text-green-500">✓</div>}
+                    </div>
+                  );
+                })()}
+              </div>
+            </StepCard>
+          )}
+
+          {/* Step 14: Final Encoding */}
           <StepCard 
             number="14" 
-            title="Native SegWit Address" 
+            title={`${addressType.charAt(0).toUpperCase() + addressType.slice(1)} Address`} 
             isActive={step === 14} 
             isLocked={step < 14}
             isCompleted={step > 14}
-            hint="ใช้เครื่องมือ Bech32 Encode โดย Data = 00 + Payload (ด่าน 13), HRP = bc จากนั้นนำผลลัพธ์มาต่อท้าย 'bc1' เพื่อให้ได้ที่อยู่เต็ม"
+            hint={
+              addressType === 'legacy' ? "ใช้ Base58Check Encode ข้อมูล: Prefix '00' + Payload (ด่าน 13)" :
+              addressType === 'nested' ? "ใช้ Base58Check Encode ข้อมูล: Prefix '05' + Payload (ด่าน 13)" :
+              addressType === 'native' ? "ใช้ Bech32 Encode (Version 0) ข้อมูล: HRP 'bc' + Payload (ด่าน 13)" :
+              "ใช้ Bech32m Encode (Version 1) ข้อมูล: HRP 'bc' + Output Key (นำด่าน 13.3 ตัด 2 ไตว์แรก 02/03 ทิ้งให้เหลือแต่พิกัด X-only 64 อักษร)"
+            }
           >
             <div className="space-y-8">
               <p className="text-gray-500 dark:text-gray-400 leading-relaxed text-sm">
@@ -668,7 +872,11 @@ function App() {
                         className={`w-full bg-white dark:bg-black border-2 rounded-2xl p-4 font-mono text-xs md:text-sm outline-none transition-all shadow-inner text-black dark:text-white h-20 resize-none break-all ${
                           addrInput === bip84Address ? 'border-green-500/50' : 'border-gray-200 dark:border-gray-800 focus:border-blue-500/30'
                         }`}
-                        placeholder="Manually assemble: prefix + bech32_data..."
+                        placeholder={
+                          addressType === 'legacy' || addressType === 'nested' 
+                            ? "Manually assemble: prefix + payload + checksum..." 
+                            : "Manually assemble: hrp + separator + encoded_data..."
+                        }
                       />
                       {addrInput === bip84Address && <div className="absolute right-4 top-4 text-green-500 text-xl">✓</div>}
                     </div>

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { cryptoUtils, hexToBytes, bytesToHex } from '../utils/crypto';
-import { bech32 } from 'bech32';
+import { bech32, bech32m } from 'bech32';
 
 export default function Toolbox() {
   const [algo, setAlgo] = useState('SHA-256');
@@ -8,22 +8,26 @@ export default function Toolbox() {
   const [output, setOutput] = useState('-');
   const [error, setError] = useState('');
 
-  const hasSecondary = algo === 'PBKDF2' || algo === 'HMAC-SHA512' || algo === 'BigInt Add (Mod N)' || algo === 'Base Converter' || algo === 'Bech32 Encode';
+  const hasSecondary = algo === 'PBKDF2' || algo === 'HMAC-SHA512' || algo === 'BigInt Add (Mod N)' || algo === 'Base Converter' || algo === 'Bech32/m Encode' || algo === 'Tagged Hash' || algo === 'EC-Point-Add';
   const isBIP32Math = algo === 'BigInt Add (Mod N)';
   const isBaseConv = algo === 'Base Converter';
-  const isBech32 = algo === 'Bech32 Encode';
+  const isBech32 = algo === 'Bech32/m Encode';
 
   const getAlgoDetails = (name) => {
     switch (name) {
-      case 'PBKDF2': return "Mnemonic -> Seed: Password = Mnemonic String, Salt = 'mnemonic' + passphrase. Iterations = 2048, Length = 64 bytes.";
-      case 'HMAC-SHA512': return "BIP32 Derivation: Key = Parent Chain Code. Data (Hardened) = 0x00 + Parent Private Key + (Index + 0x80000000). Data (Normal) = Parent Public Key + Index. Output IL (Left 32B) + IR (Right 32B).";
-      case 'BigInt Add (Mod N)': return "BIP32 Key Addition: Output = (A + B) % N. Default N is Secp256k1 order.";
-      case 'Base Converter': return "Convert numbers between bases. E.g. Dec (10) to Hex (16).";
-      case 'Bech32 Encode': return "Manual Bech32: 1) Prepend Witness Version (00) to Payload Hex. 2) Enter HRP (bc) for checksum. 3) Output is 'data + checksum'. 4) Manually add 'bc1' prefix to get final address.";
-      case 'SHA-256': return "Hashing entropy or checksum verification.";
-      case 'HASH-160': return "Public Key to Address: SHA-256 then RIPEMD-160.";
-      case 'EC-Multiply': return "Private Key to Public Key (Compressed).";
-      default: return "";
+      case 'PBKDF2': return { desc: "PBKDF2 HMAC-SHA512 ใช้สร้าง Seed จากรายชื่อคำ Mnemonic", formula: "PBKDF2(Password=Mnemonic, Salt='mnemonic'+Passphrase, c=2048)" };
+      case 'HMAC-SHA512': return { desc: "สร้างกุญแจลูกหรือ Master Key (BIP32)", formula: "HMAC-SHA512(Key=ParentCC, Data=KeyData) => IL || IR" };
+      case 'BigInt Add (Mod N)': return { desc: "บวกเลขขนาดใหญ่และหาเศษจาก N (เพื่อให้ค่าไม่หลุดเส้นโค้ง Secp256k1)", formula: "(A + B) % N" };
+      case 'Base Converter': return { desc: "เครื่องมือแปลงเลขฐานด่วน (เช่น ข้ามไปมาระหว่างฐาน 2 กับฐาน 16)" };
+      case 'Bech32/m Encode': return { desc: "มาตรฐานเข้ารหัส Address แบบ SegWit (BIP173) และ Taproot (BIP350)", formula: "Bech32m(HRP='bc', Version=1, Data=Payload)" };
+      case 'Base58Check': return { desc: "เข้ารหัส Address ยุคดั้งเดิม (Legacy/Nested Segwit) ด้วย Base58", formula: "Base58(Data + SHA256(SHA256(Data))[0:4])" };
+      case 'Taproot Tweak': return { desc: "ปรับแต่ง Public Key แบบอัตโนมัติตามกฎ BIP341", formula: "Q = P + (tweakHash * G)" };
+      case 'SHA-256': return { desc: "อัลกอริทึมแฮชแบบดั้งเดิม 256 บิต", formula: "SHA256(Data)" };
+      case 'HASH-160': return { desc: "อัลกอริทึมแฮชสั้น 160 บิต สำหรับสร้าง Address P2PKH/P2SH", formula: "RIPEMD160(SHA256(Data))" };
+      case 'EC-Multiply': return { desc: "สร้าง Public Key ด้วยการคูณจุดบนเส้นโค้ง Elliptic Curve", formula: "P = d * G (d = Private Key)" };
+      case 'EC-Point-Add': return { desc: "บวกจุด 2 จุดบนเส้นโค้งเข้าด้วยกัน (แกนหลักของ Taproot)", formula: "R = P1 + P2" };
+      case 'Tagged Hash': return { desc: "ใช้สร้างโดเมนของการแฮชให้เฉพาะเจาะจง ไม่ซ้ำกับส่วนอื่น (BIP340)", formula: "SHA256(SHA256(Tag) || SHA256(Tag) || Data)" };
+      default: return { desc: "" };
     }
   };
 
@@ -96,20 +100,25 @@ export default function Toolbox() {
             result = num.toString(toBase).toLowerCase();
             break;
           }
-          case 'Bech32 Encode': {
-            const hrp = inputs.extra || 'bc';
-            const dataBytes = hexToBytes(inputs.primary.replace(/\s/g, ''));
+          case 'Taproot Tweak':
+            result = bytesToHex(cryptoUtils.taprootTweak(hexToBytes(primaryClean)));
+            break;
+          case 'Tagged Hash':
+            result = cryptoUtils.taggedHash(inputs.secondary, hexToBytes(primaryClean));
+            break;
+          case 'EC-Point-Add':
+            result = cryptoUtils.ecAdd(primaryClean, secondaryClean);
+            break;
+          case 'Bech32/m Encode': {
+            const hrp = inputs.extra || '';
+            const version = parseInt(inputs.secondary) || 0;
+            const dataBytes = hexToBytes(primaryClean);
             if (dataBytes.length < 1) throw new Error("Empty data");
             
-            // Treat the FIRST BYTE as the first 5-bit word (Witness Version)
-            // Perform toWords on the REST of the bytes (Payload)
-            const firstByteWord = dataBytes[0];
-            const payloadWords = bech32.toWords(dataBytes.slice(1));
-            const words = [firstByteWord, ...payloadWords];
-            
-            const fullEncoding = bech32.encode(hrp, words);
-            // Return only the part after the separator '1'
-            result = fullEncoding.split('1').pop();
+            const words = bech32.toWords(dataBytes);
+            result = version === 0 
+              ? bech32.encode(hrp, [0, ...words], 1024)
+              : bech32m.encode(hrp, [1, ...words], 1024);
             break;
           }
           default:
@@ -145,6 +154,10 @@ export default function Toolbox() {
                 setInputs({ primary: '', secondary: '10', extra: '16', secondary_extra: '' });
               } else if (newAlgo === 'PBKDF2') {
                 setInputs({ primary: '', secondary: '', extra: '2048', secondary_extra: '64' });
+              } else if (newAlgo === 'Tagged Hash') {
+                setInputs({ primary: '', secondary: '', extra: '', secondary_extra: '' });
+              } else if (newAlgo === 'Bech32/m Encode') {
+                setInputs({ primary: '', secondary: '0', extra: '', secondary_extra: '' });
               } else {
                 setInputs({ primary: '', secondary: '', extra: '', secondary_extra: '' });
               }
@@ -153,21 +166,34 @@ export default function Toolbox() {
           >
             <option>Base Converter</option>
             <option>Base58Check</option>
-            <option>Bech32 Encode</option>
+            <option>Bech32/m Encode</option>
             <option>BigInt Add (Mod N)</option>
             <option>EC-Multiply</option>
+            <option>EC-Point-Add</option>
             <option>HASH-160</option>
             <option>HMAC-SHA512</option>
             <option>PBKDF2</option>
             <option>RIPEMD-160</option>
             <option>SHA-256</option>
+            <option>Tagged Hash</option>
+            <option>Taproot Tweak</option>
           </select>
+          
+          <div className="mt-2 p-3 bg-blue-50/50 dark:bg-blue-900/10 border border-blue-100 dark:border-blue-800/50 rounded-xl">
+            <p className="text-xs text-blue-600 dark:text-blue-400 font-medium mb-1">💡 {getAlgoDetails(algo).desc}</p>
+            {getAlgoDetails(algo).formula && (
+              <p className="text-[10px] text-gray-500 dark:text-gray-400 font-mono bg-white dark:bg-black p-2 rounded-lg border border-gray-100 dark:border-gray-800 mt-2">
+                <span className="text-purple-500 font-bold mr-2">fn(x)</span> 
+                {getAlgoDetails(algo).formula}
+              </p>
+            )}
+          </div>
         </div>
 
         <div className="space-y-4">
           <div>
             <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-2">
-              {algo === 'PBKDF2' ? 'Password' : isBIP32Math ? 'Value A' : isBaseConv ? 'Number' : isBech32 ? 'Data (Hex)' : 'Data'}
+              {algo === 'PBKDF2' ? 'Password' : isBIP32Math || algo === 'EC-Point-Add' ? 'Value A (Hex)' : isBaseConv ? 'Number' : isBech32 ? 'Data (Hex)' : 'Data'}
             </label>
             <textarea 
               value={inputs.primary}
@@ -180,7 +206,7 @@ export default function Toolbox() {
           {hasSecondary && !isBech32 && !isBaseConv && (
             <div>
               <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-2">
-                {algo === 'PBKDF2' ? 'Salt' : isBIP32Math ? 'Value B' : 'Key'}
+                {algo === 'PBKDF2' ? 'Salt' : isBIP32Math || algo === 'EC-Point-Add' ? 'Value B (Hex)' : algo === 'Tagged Hash' ? 'Tag Name' : 'Key'}
               </label>
               <textarea 
                 value={inputs.secondary}
@@ -196,7 +222,31 @@ export default function Toolbox() {
               <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-2">
                 {isBIP32Math ? 'Modulo N (Hex)' : isBaseConv ? 'From Base' : isBech32 ? 'HRP for Checksum' : algo === 'PBKDF2' ? 'Iterations' : 'Extra'}
               </label>
-              {isBaseConv ? (
+              {isBech32 ? (
+                <div className="flex flex-col gap-4">
+                  <div className="flex flex-col gap-2">
+                    <label className="text-[10px] text-gray-400 font-bold">Witness Version</label>
+                    <select 
+                      value={inputs.secondary}
+                      onChange={(e) => setInputs({ ...inputs, secondary: e.target.value })}
+                      className="w-full bg-white dark:bg-black border-2 border-gray-200 dark:border-gray-700 rounded-2xl p-2 font-medium text-black dark:text-white outline-none"
+                    >
+                      <option value="0">0 (Native Segwit/Bech32)</option>
+                      <option value="1">1 (Taproot/Bech32m)</option>
+                    </select>
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    <label className="text-[10px] text-gray-400 font-bold">HRP (e.g. bc)</label>
+                    <input 
+                      type="text"
+                      value={inputs.extra}
+                      onChange={(e) => setInputs({ ...inputs, extra: e.target.value })}
+                      className="w-full bg-white dark:bg-black border-2 border-gray-200 dark:border-gray-800 rounded-2xl p-2 font-mono text-sm text-black dark:text-white outline-none"
+                      placeholder="Enter value..."
+                    />
+                  </div>
+                </div>
+              ) : isBaseConv ? (
                 <select 
                   value={inputs.secondary}
                   onChange={(e) => setInputs({ ...inputs, secondary: e.target.value })}
@@ -252,7 +302,7 @@ export default function Toolbox() {
                 ? 'bg-red-50 dark:bg-red-900/10 border-red-200 dark:border-red-800 text-red-500' 
                 : 'bg-green-50/50 dark:bg-green-900/5 border-gray-200 dark:border-gray-700 text-green-600 dark:text-green-400'
             }`}>
-              {output}
+              {output === 'Invalid Input' && error ? `${output}: ${error}` : output}
             </div>
             {output !== '-' && output !== 'Invalid Input' && (
               <button 

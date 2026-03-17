@@ -19,7 +19,7 @@ export default function StepCard({ number, title, isActive, isLocked, isComplete
             <span className={`w-10 h-10 rounded-2xl flex items-center justify-center font-bold text-lg transition-colors ${
               isActive ? 'bg-blue-500 text-white' : isCompleted ? 'bg-green-500 text-white' : 'bg-gray-100 dark:bg-gray-800 text-gray-400'
             }`}>
-              {isCompleted ? '✓' : number}
+              {number}
             </span>
             <h2 className="text-2xl font-bold tracking-tight">{title}</h2>
           </div>

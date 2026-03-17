@@ -55,6 +55,19 @@ export const cryptoUtils = {
     const pubKey = secp256k1.getPublicKey(privKey, true); // true for compressed
     return bytesToHex(pubKey);
   },
+  ecAdd: (pubKeyAHex, pubKeyBHex) => {
+    const A = secp256k1.Point.fromHex(pubKeyAHex);
+    const B = secp256k1.Point.fromHex(pubKeyBHex);
+    return A.add(B).toHex(true);
+  },
+  taggedHash: (tag, data) => {
+    const tagHash = sha256(new TextEncoder().encode(tag));
+    const combined = new Uint8Array(tagHash.length * 2 + data.length);
+    combined.set(tagHash);
+    combined.set(tagHash, tagHash.length);
+    combined.set(data, tagHash.length * 2);
+    return bytesToHex(sha256(combined));
+  },
   deriveChild: (parentPrivHex, parentChainCodeHex, index, hardened) => {
     const parentPriv = hexToBytes(parentPrivHex);
     const parentCC = hexToBytes(parentChainCodeHex);
@@ -85,5 +98,43 @@ export const cryptoUtils = {
       privKey: childPriv.toString(16).padStart(64, '0'),
       chainCode: bytesToHex(IR)
     };
+  },
+  // Taproot Tweaking (BIP341)
+  taprootTweak: (pubKeyBytes) => {
+    const xOnly = pubKeyBytes.slice(1); // X-only is just the X coordinate
+    const tag = "TapTweak";
+    const tagHash = sha256(new TextEncoder().encode(tag));
+    const tweakHash = sha256(new Uint8Array([...tagHash, ...tagHash, ...xOnly]));
+    
+    // BIP341 requires P to have an even Y coordinate for the tweak addition
+    const evenPubKeyHex = '02' + bytesToHex(xOnly);
+    const P = secp256k1.Point.fromHex(evenPubKeyHex);
+    const tweak = BigInt('0x' + bytesToHex(tweakHash));
+    const Q = P.add(secp256k1.Point.BASE.multiply(tweak));
+    
+    // Return tweaked X-only pubkey
+    return hexToBytes(Q.toHex(true).slice(2)); 
+  },
+  // High-level Address Builders
+  p2pkh: (pubKeyHex) => {
+    const hash = hexToBytes(cryptoUtils.hash160(hexToBytes(pubKeyHex)));
+    const payload = new Uint8Array(1 + 20);
+    payload[0] = 0x00; // Network prefix
+    payload.set(hash, 1);
+    return cryptoUtils.base58check(payload);
+  },
+  p2sh_p2wpkh: (pubKeyHex) => {
+    const pubHash = hexToBytes(cryptoUtils.hash160(hexToBytes(pubKeyHex)));
+    const witnessProgram = new Uint8Array([0x00, 0x14, ...pubHash]);
+    const scriptHash = hexToBytes(cryptoUtils.hash160(witnessProgram));
+    const payload = new Uint8Array(1 + 20);
+    payload[0] = 0x05; // Nested SegWit prefix
+    payload.set(scriptHash, 1);
+    return cryptoUtils.base58check(payload);
+  },
+  p2tr: (pubKeyHex) => {
+    const pubKeyBytes = hexToBytes(pubKeyHex);
+    const tweakedX = cryptoUtils.taprootTweak(pubKeyBytes);
+    return cryptoUtils.bech32m("bc", tweakedX, 1);
   }
 };
