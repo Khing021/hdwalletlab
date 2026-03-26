@@ -11,6 +11,8 @@ function App() {
   const [seedInput, setSeedInput] = useState('');
   const [step, setStep] = useState(1);
   const [guessedWords, setGuessedWords] = useState(Array(12).fill(''));
+  const [isXpubMode, setIsXpubMode] = useState(false);
+  const [xpubInputs, setXpubInputs] = useState(Array(5).fill(null).map(() => ({ pub: '', xpub: '', ypub: '', zpub: '' })));
 
   const toggleTheme = () => setIsDark(!isDark);
 
@@ -114,6 +116,40 @@ function App() {
     }
   }, [addressType, childKeys]);
 
+  const isValidPath = (path) => {
+    const pathRegex = /^m(\/\d+'?){5}$/;
+    if (!pathRegex.test(path)) return false;
+    const parts = path.split('/').slice(1);
+    const purpose = parts[0];
+    const coinType = parts[1];
+    const change = parts[3];
+    return ["44'", "49'", "84'", "86'"].includes(purpose) && 
+           coinType === "0'" && 
+           ["0", "1"].includes(change);
+  };
+
+  const isXpubComplete = useMemo(() => {
+    if (!isXpubMode) return false;
+    const targets = [2, 3]; // Step 9 and 10
+    return targets.every(i => {
+      const key = childKeys[i];
+      if (!key) return false;
+      const fingerprint = cryptoUtils.getFingerprint(key.parentPub);
+      const expectedXpub = cryptoUtils.serializeXpub(key.depth, fingerprint, key.index, key.cc, key.pub);
+      const ok = xpubInputs[i]?.pub === key.pub && xpubInputs[i]?.xpub === expectedXpub;
+      if (!ok) return false;
+      if (addressType === 'nested') {
+        const expectedYpub = cryptoUtils.serializeXpub(key.depth, fingerprint, key.index, key.cc, key.pub, "049d7cb2");
+        return xpubInputs[i]?.ypub === expectedYpub;
+      }
+      if (addressType === 'native') {
+        const expectedZpub = cryptoUtils.serializeXpub(key.depth, fingerprint, key.index, key.cc, key.pub, "04b24746");
+        return xpubInputs[i]?.zpub === expectedZpub;
+      }
+      return true;
+    });
+  }, [isXpubMode, xpubInputs, childKeys, addressType]);
+
   const randomizePath = () => {
     const purposes = ["44'", "49'", "84'", "86'"];
     const purpose = purposes[Math.floor(Math.random() * purposes.length)];
@@ -145,15 +181,29 @@ function App() {
         const parts = derivationPath.split('/').slice(1);
         let currPriv = rPriv;
         let currCC = rCC;
+        let currParentPub = cryptoUtils.ecMultiply(rPriv);
         const intermediate = [];
 
-        for (const part of parts) {
+        for (let i = 0; i < parts.length; i++) {
+          const part = parts[i];
           const hardened = part.endsWith("'");
           const idx = parseInt(part.replace("'", ""));
           const result = cryptoUtils.deriveChild(currPriv, currCC, idx, hardened);
+          
+          const prevPub = currParentPub;
           currPriv = result.privKey;
           currCC = result.chainCode;
-          intermediate.push({ priv: currPriv, cc: currCC, label: part });
+          currParentPub = cryptoUtils.ecMultiply(currPriv);
+
+          intermediate.push({ 
+            priv: currPriv, 
+            cc: currCC, 
+            pub: currParentPub,
+            parentPub: prevPub,
+            label: part,
+            depth: i + 1,
+            index: hardened ? idx + 0x80000000 : idx
+          });
         }
         setChildKeys(intermediate);
 
@@ -541,14 +591,12 @@ function App() {
                       setTapSubStep(1);
                       setStep(6);
                   
-                      // Auto-validate BIP32 format: m/purpose'/coin'/account'/change/index
-                      const pathRegex = /^m(\/\d+'?){5}$/;
-                      if (pathRegex.test(val)) {
+                      if (isValidPath(val)) {
                         setStep(7);
                       }
                     }}
                     className={`w-full bg-white dark:bg-black border-2 rounded-2xl p-4 font-mono text-sm outline-none transition-all shadow-inner text-black dark:text-white ${
-                      /^m(\/\d+'?){5}$/.test(derivationPath) ? 'border-green-500/50' : 'border-gray-200 dark:border-gray-800 focus:border-blue-500/30'
+                      isValidPath(derivationPath) ? 'border-green-500/50' : 'border-gray-200 dark:border-gray-800 focus:border-red-500/30'
                     }`}
                   />
                   <button 
@@ -559,8 +607,13 @@ function App() {
                   </button>
                 </div>
                 <button 
-                  onClick={() => setStep(7)}
-                  className="px-8 py-4 bg-indigo-600 text-white rounded-2xl font-bold text-sm uppercase tracking-widest hover:scale-105 active:scale-95 transition-all shadow-lg shadow-indigo-500/20"
+                  onClick={() => isValidPath(derivationPath) && setStep(7)}
+                  disabled={!isValidPath(derivationPath)}
+                  className={`px-8 py-4 rounded-2xl font-bold text-sm uppercase tracking-widest transition-all shadow-lg ${
+                    isValidPath(derivationPath)
+                      ? 'bg-indigo-600 text-white hover:scale-105 active:scale-95 shadow-indigo-500/20'
+                      : 'bg-gray-200 dark:bg-gray-800 text-gray-400 cursor-not-allowed opacity-50'
+                  }`}
                 >
                   Confirm & Derive
                 </button>
@@ -580,8 +633,8 @@ function App() {
               hint={
                 i === 0 ? `Hardened Derivation (${key.label}): 1. ใช้ HMAC-SHA512 (Key=Root CC, Data=0x00 + Root Priv + ${pathDetails[0]?.hex || '...'}) 2. แบ่งครึ่งผลลัพธ์: ครึ่งแรก=IL, ครึ่งหลัง=CC ใหม่ 3. นำ IL + Root Priv ใน BigInt Add เพื่อหา Private Key` :
                 i === 1 ? `Hardened Derivation (${key.label}): 1. ใช้ HMAC-SHA512 (Key=CC ด่าน 7, Data=0x00 + Priv ด่าน 7 + ${pathDetails[1]?.hex || '...'}) 2. แบ่งครึ่งผลลัพธ์: ครึ่งแรก=IL, ครึ่งหลัง=CC ใหม่ 3. นำ IL + Priv ด่าน 7 ใน BigInt Add เพื่อหา Private Key` :
-                i === 2 ? `Hardened Derivation (${key.label}): 1. ใช้ HMAC-SHA512 (Key=CC ด่าน 8, Data=0x00 + Priv ด่าน 8 + ${pathDetails[2]?.hex || '...'}) 2. แบ่งครึ่งผลลัพธ์: ครึ่งแรก=IL, ครึ่งหลัง=CC ใหม่ 3. นำ IL + Priv ด่าน 8 ใน BigInt Add เพื่อหา Private Key` :
-                i === 3 ? `Normal Derivation (${key.label}): 1. หา Public Key ของด่าน 9 (EC-Multiply) 2. ใช้ HMAC-SHA512 (Key=CC ด่าน 9, Data=PubKey ด่าน 9 + ${pathDetails[3]?.hex || '...'}) 3. แบ่งครึ่งหา IL/CC 4. นำ IL + Priv ด่าน 9 ใน BigInt Add` :
+                i === 2 ? `Hardened Derivation (${key.label}): 1. ใช้ HMAC-SHA512 (Key=CC ด่าน 8, Data=0x00 + Priv ด่าน 8 + ${pathDetails[2]?.hex || '...'}) 2. หา IL/CC ใหม่ 3. IL + Priv ด่าน 8 = Priv ใหม่${isXpubMode ? ` [xpub: 1.Version(${addressType === 'nested' ? '0488b21e(xpub) และ 049d7cb2(ypub)' : addressType === 'native' ? '0488b21e(xpub) และ 04b24746(zpub)' : '0488b21e(xpub)'}) 2.Depth(03) 3.Fingerprint(8 ตัวแรกของ HASH-160(PubKey ด่าน 8)) 4.Index(${pathDetails[2]?.hex || '...'}) 5.ChainCode 6.PubKey 7.รวม 1-6 เข้า Base58Check]` : ""}` :
+                i === 3 ? `Normal Derivation (${key.label}): 1. หา PubKey ด่าน 9 2. HMAC-SHA512 (Key=CC ด่าน 9, Data=PubKey ด่าน 9 + ${pathDetails[3]?.hex || '...'}) 3. IL + Priv ด่าน 9 = Priv ใหม่${isXpubMode ? ` [xpub mode CKDpub: 1.Version(${addressType === 'nested' ? '0488b21e(xpub) และ 049d7cb2(ypub)' : addressType === 'native' ? '0488b21e(xpub) และ 04b24746(zpub)' : '0488b21e(xpub)'}) 2.HMAC(Key=CC ด่าน 9, Data=PubKey ด่าน 9 + ${pathDetails[3]?.hex || '...'})->IL/CC 2.Tweak=EC-Multiply(IL) 3.PubKey ใหม่=EC-Point-Add(PubKey ด่าน 9, Tweak)]` : ""}` :
                 `Normal Derivation (${key.label}): 1. หา Public Key ของด่าน 10 (EC-Multiply) 2. ใช้ HMAC-SHA512 (Key=CC ด่าน 10, Data=PubKey ด่าน 10 + ${pathDetails[4]?.hex || '...'}) 3. แบ่งครึ่งหา IL/CC 4. นำ IL + Priv ด่าน 10 ใน BigInt Add`
               }
             >
@@ -644,6 +697,117 @@ function App() {
                   </div>
                   {step > (7 + i) && <p className="text-[10px] text-green-500 font-bold uppercase tracking-widest px-1">✓ Child Derived & Verified</p>}
                 </div>
+
+                {i === 2 && (
+                  <div className="flex justify-start mt-4">
+                    <button 
+                      onClick={() => setIsXpubMode(!isXpubMode)}
+                      className={`px-4 py-2 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all border ${
+                        isXpubMode 
+                          ? 'bg-blue-500/10 border-blue-500 text-blue-500' 
+                          : 'bg-gray-100 dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-400'
+                      }`}
+                    >
+                      {isXpubMode ? 'Disable xpub Mode' : 'Enable xpub Mode'}
+                    </button>
+                  </div>
+                )}
+
+                {isXpubMode && (i === 2 || i === 3) && (
+                  <div className="mt-6 p-6 bg-blue-50/10 dark:bg-blue-900/5 rounded-3xl border border-blue-200/20 space-y-4 animate-in fade-in slide-in-from-top-4 duration-500">
+                    <div className="flex flex-col gap-2">
+                       <label className="text-[10px] font-black tracking-[0.2em] text-blue-500/70 px-1">{i === 2 ? 'Account' : 'Change'} Public Key (Hex)</label>
+                       <textarea 
+                         value={xpubInputs[i]?.pub || ''}
+                         onChange={(e) => {
+                           const val = e.target.value.trim().toLowerCase();
+                           const expected = key.pub;
+                           const finalVal = val === '///' ? expected : val;
+                           const newInputs = [...xpubInputs];
+                           newInputs[i] = { ...newInputs[i], pub: finalVal };
+                           setXpubInputs(newInputs);
+                         }}
+                         className={`w-full bg-white dark:bg-black border-2 rounded-2xl p-4 font-mono text-xs outline-none transition-all shadow-inner text-black dark:text-white h-16 resize-none break-all ${
+                           xpubInputs[i]?.pub === key.pub ? 'border-green-500/50' : 'border-gray-200 dark:border-gray-800 focus:border-blue-500/30'
+                         }`}
+                         placeholder="Paste compressed public key..."
+                       />
+                    </div>
+                    <div className="flex flex-col gap-2">
+                       <label className="text-[10px] font-black tracking-[0.2em] text-blue-500/70 px-1">{i === 2 ? 'Account' : 'Change'} xpub</label>
+                       <textarea 
+                         value={xpubInputs[i]?.xpub || ''}
+                         onChange={(e) => {
+                           const val = e.target.value.trim();
+                           const finger = cryptoUtils.getFingerprint(key.parentPub);
+                           const expected = cryptoUtils.serializeXpub(key.depth, finger, key.index, key.cc, key.pub);
+                           const finalVal = val === '///' ? expected : val;
+                           const newInputs = [...xpubInputs];
+                           newInputs[i] = { ...newInputs[i], xpub: finalVal };
+                           setXpubInputs(newInputs);
+                         }}
+                         className={`w-full bg-white dark:bg-black border-2 rounded-2xl p-4 font-mono text-xs outline-none transition-all shadow-inner text-black dark:text-white h-16 resize-none break-all ${
+                           (() => {
+                             const finger = cryptoUtils.getFingerprint(key.parentPub);
+                             const expected = cryptoUtils.serializeXpub(key.depth, finger, key.index, key.cc, key.pub);
+                             return xpubInputs[i]?.xpub === expected;
+                           })() ? 'border-green-500/50' : 'border-gray-200 dark:border-gray-800 focus:border-blue-500/30'
+                         }`}
+                         placeholder="Enter standard xpub..."
+                       />
+                    </div>
+                    {addressType === 'nested' && (
+                      <div className="flex flex-col gap-2">
+                         <label className="text-[10px] font-black tracking-[0.2em] text-blue-500/70 px-1">{i === 2 ? 'Account' : 'Change'} ypub</label>
+                         <textarea 
+                           value={xpubInputs[i]?.ypub || ''}
+                           onChange={(e) => {
+                             const val = e.target.value.trim();
+                             const finger = cryptoUtils.getFingerprint(key.parentPub);
+                             const expected = cryptoUtils.serializeXpub(key.depth, finger, key.index, key.cc, key.pub, "049d7cb2");
+                             const finalVal = val === '///' ? expected : val;
+                             const newInputs = [...xpubInputs];
+                             newInputs[i] = { ...newInputs[i], ypub: finalVal };
+                             setXpubInputs(newInputs);
+                           }}
+                           className={`w-full bg-white dark:bg-black border-2 rounded-2xl p-4 font-mono text-xs outline-none transition-all shadow-inner text-black dark:text-white h-16 resize-none break-all ${
+                             (() => {
+                               const finger = cryptoUtils.getFingerprint(key.parentPub);
+                               const expected = cryptoUtils.serializeXpub(key.depth, finger, key.index, key.cc, key.pub, "049d7cb2");
+                               return xpubInputs[i]?.ypub === expected;
+                             })() ? 'border-green-500/50' : 'border-gray-200 dark:border-gray-800 focus:border-blue-500/30'
+                           }`}
+                           placeholder="Enter ypub (BIP49)..."
+                         />
+                      </div>
+                    )}
+                    {addressType === 'native' && (
+                      <div className="flex flex-col gap-2">
+                         <label className="text-[10px] font-black tracking-[0.2em] text-blue-500/70 px-1">{i === 2 ? 'Account' : 'Change'} zpub</label>
+                         <textarea 
+                           value={xpubInputs[i]?.zpub || ''}
+                           onChange={(e) => {
+                             const val = e.target.value.trim();
+                             const finger = cryptoUtils.getFingerprint(key.parentPub);
+                             const expected = cryptoUtils.serializeXpub(key.depth, finger, key.index, key.cc, key.pub, "04b24746");
+                             const finalVal = val === '///' ? expected : val;
+                             const newInputs = [...xpubInputs];
+                             newInputs[i] = { ...newInputs[i], zpub: finalVal };
+                             setXpubInputs(newInputs);
+                           }}
+                           className={`w-full bg-white dark:bg-black border-2 rounded-2xl p-4 font-mono text-xs outline-none transition-all shadow-inner text-black dark:text-white h-16 resize-none break-all ${
+                             (() => {
+                               const finger = cryptoUtils.getFingerprint(key.parentPub);
+                               const expected = cryptoUtils.serializeXpub(key.depth, finger, key.index, key.cc, key.pub, "04b24746");
+                               return xpubInputs[i]?.zpub === expected;
+                             })() ? 'border-green-500/50' : 'border-gray-200 dark:border-gray-800 focus:border-blue-500/30'
+                           }`}
+                           placeholder="Enter zpub (BIP84)..."
+                         />
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             </StepCard>
           ))}
@@ -655,7 +819,7 @@ function App() {
             isActive={step === 12} 
             isLocked={step < 12}
             isCompleted={step > 12}
-            hint="ใช้เครื่องมือ EC-Multiply โดยใส่ Private Key จากด่านที่แล้วลงในช่อง Data เพื่อให้ได้ Compressed Public Key"
+            hint={`ใช้เครื่องมือ EC-Multiply โดยใส่ Private Key จากด่านที่แล้วลงในช่อง Data เพื่อให้ได้ Compressed Public Key${isXpubMode ? " หรือใช้ xpub จากด่านที่ 10 มาคำนวณหาได้เช่นกัน" : ""}`}
           >
             <div className="space-y-6">
               <p className="text-gray-500 dark:text-gray-400 leading-relaxed text-sm">
@@ -893,7 +1057,24 @@ function App() {
               </button>
 
               <p className="text-center text-gray-400 text-xs italic leading-relaxed">
-                Congratulations! You've manually derived a Bitcoin address through the entire HD Wallet stack. 🚀
+                {isXpubComplete ? (
+                  <span className="text-green-500 font-bold block scale-110 transition-all duration-1000">
+                    🏆 มหาเทพแห่งคริปโต! คุณสำเร็จการเดินทางใน xpub Mode อย่างสมบูรณ์แบบ 🚀
+                  </span>
+                ) : (
+                  <>
+                    Congratulations! You've manually derived a Bitcoin address through the entire HD Wallet stack. 🚀
+                    {isXpubMode ? (
+                      <span className="block mt-2 text-amber-500">
+                        ⚠️ เกือบได้ความสำเร็จพิเศษแล้ว! กรอกข้อมูลใน xpub mode ให้ครบและถูกต้องเพื่อปลดล็อค
+                      </span>
+                    ) : (
+                      <span className="block mt-2 opacity-50">
+                        (ปลดล็อคความสำเร็จพิเศษด้วยการเล่น xpub mode ในด่าน 9-10)
+                      </span>
+                    )}
+                  </>
+                )}
               </p>
             </div>
           </StepCard>

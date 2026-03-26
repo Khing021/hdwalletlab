@@ -23,6 +23,8 @@ export default function Toolbox() {
       case 'Base58Check': return { desc: "เข้ารหัส Address ยุคดั้งเดิม (Legacy/Nested Segwit) ด้วย Base58", formula: "Base58(Data + SHA256(SHA256(Data))[0:4])" };
       case 'Taproot Tweak': return { desc: "ปรับแต่ง Public Key แบบอัตโนมัติตามกฎ BIP341", formula: "Q = P + (tweakHash * G)" };
       case 'SHA-256': return { desc: "อัลกอริทึมแฮชแบบดั้งเดิม 256 บิต", formula: "SHA256(Data)" };
+      case 'Base58 Decode': return { desc: "ถอดรหัส Base58 เพื่อดูข้อมูลดิบ (Hex)" };
+      case 'Bech32 Decode': return { desc: "ถอดรหัส Bech32/m เพื่อดู HRP, Version และ Payload" };
       case 'HASH-160': return { desc: "อัลกอริทึมแฮชสั้น 160 บิต สำหรับสร้าง Address P2PKH/P2SH", formula: "RIPEMD160(SHA256(Data))" };
       case 'EC-Multiply': return { desc: "สร้าง Public Key ด้วยการคูณจุดบนเส้นโค้ง Elliptic Curve", formula: "P = d * G (d = Private Key)" };
       case 'EC-Point-Add': return { desc: "บวกจุด 2 จุดบนเส้นโค้งเข้าด้วยกัน (แกนหลักของ Taproot)", formula: "R = P1 + P2" };
@@ -90,7 +92,6 @@ export default function Toolbox() {
           case 'Base Converter': {
             const fromBase = parseInt(inputs.secondary) || 10;
             const toBase = parseInt(inputs.extra) || 16;
-            const primaryClean = inputs.primary.replace(/\s/g, '');
             
             let numStr = primaryClean;
             if (fromBase === 2) numStr = '0b' + primaryClean;
@@ -98,6 +99,23 @@ export default function Toolbox() {
             
             const num = BigInt(numStr);
             result = num.toString(toBase).toLowerCase();
+            
+            // Auto-padding for crypto consistency
+            if (toBase === 2 && fromBase === 16) {
+              const hexPart = primaryClean.replace(/^0x/, '');
+              result = result.padStart(hexPart.length * 4, '0');
+            } else if (toBase === 16 && fromBase === 2) {
+              const binPart = primaryClean.replace(/^0b/, '');
+              result = result.padStart(Math.ceil(binPart.length / 4), '0');
+            }
+            break;
+          }
+          case 'Base58 Decode':
+            result = cryptoUtils.base58Decode(inputs.primary.trim());
+            break;
+          case 'Bech32 Decode': {
+            const decoded = cryptoUtils.bech32Decode(inputs.primary.trim());
+            result = `HRP: ${decoded.prefix}\nVersion: ${decoded.version}\nPayload (Hex): ${decoded.hex}`;
             break;
           }
           case 'Taproot Tweak':
@@ -165,7 +183,9 @@ export default function Toolbox() {
             className="w-full bg-white dark:bg-black border-2 border-gray-200 dark:border-gray-700 rounded-2xl p-3 outline-none focus:ring-2 ring-blue-500/20 transition-all font-medium text-black dark:text-white"
           >
             <option>Base Converter</option>
+            <option>Base58 Decode</option>
             <option>Base58Check</option>
+            <option>Bech32 Decode</option>
             <option>Bech32/m Encode</option>
             <option>BigInt Add (Mod N)</option>
             <option>EC-Multiply</option>

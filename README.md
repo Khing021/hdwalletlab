@@ -10,8 +10,10 @@
 - การสร้างความสุ่ม (Entropy) และการเปลี่ยนเป็น Mnemonic 12 คำ
 - การคำนวณ Seed จาก Mnemonic และ Passphrase
 - การหา Master Key และการสืบทอดกุญแจลูก (Child Key Derivation)
-- การคำนวณกุญแจสาธารณะ (Public Key) และที่อยู่แบบ Native SegWit (Bech32)
-- เครื่องมือคำนวณคริปโตกราฟีในตัว (SHA-256, HMAC-SHA512, EC-Multiply ฯลฯ)
+- การคำนวณกุญแจสาธารณะ (Public Key) และที่อยู่แบบ Native SegWit/Taproot
+- **xpub Mode**: โหมดขั้นสูงสำหรับการฝึกคำนวณ Extended Public Keys แบบแมนนวล
+- **Toolbox Decoders**: เครื่องมือแกะรหัส Base58 และ Bech32/m เพื่อตรวจสอบโครงสร้างข้อมูล
+- เครื่องมือคำนวณคริปโตกราฟีในตัว (SHA-256, RIPEMD-160, HMAC-SHA512 ฯลฯ)
 
 ## วิธีการใช้งาน
 1. ติดตั้ง dependencies: `npm install`
@@ -30,8 +32,10 @@ This project is a product of **Vibe Coding** experimentation.
 - Entropy generation and mapping to 12-word Mnemonics
 - Seed derivation from Mnemonics and Passphrases
 - Master Key generation and Child Key Derivation
-- Public Key calculation and Native SegWit (Bech32) address derivation
-- Built-in cryptographic tools (SHA-256, HMAC-SHA512, EC-Multiply, etc.)
+- Public Key calculation and Native SegWit/Taproot address derivation
+- **xpub Mode**: Advanced mode for practicing manual Extended Public Key calculations
+- **Toolbox Decoders**: Base58 and Bech32/m decoding tools for data structure inspection
+- Built-in cryptographic tools (SHA-256, RIPEMD-160, HMAC-SHA512, etc.)
 
 ## How to Run
 1. Install dependencies: `npm install`

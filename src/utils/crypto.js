@@ -136,5 +136,45 @@ export const cryptoUtils = {
     const pubKeyBytes = hexToBytes(pubKeyHex);
     const tweakedX = cryptoUtils.taprootTweak(pubKeyBytes);
     return cryptoUtils.bech32m("bc", tweakedX, 1);
+  },
+  // xpub/xpriv Helpers
+  getFingerprint: (pubKeyHex) => {
+    return cryptoUtils.hash160(hexToBytes(pubKeyHex)).slice(0, 8);
+  },
+  serializeXpub: (depth, fingerprint, childIndex, chainCode, pubKey, version = "0488b21e") => {
+    const data = new Uint8Array(4 + 1 + 4 + 4 + 32 + 33);
+    // Version: e.g. 0488b21e (mainnet xpub), 049d7cb2 (ypub), 04b24746 (zpub)
+    data.set(hexToBytes(version), 0);
+    data[4] = depth;
+    data.set(hexToBytes(fingerprint), 5);
+    const view = new DataView(data.buffer);
+    view.setUint32(9, childIndex, false);
+    data.set(hexToBytes(chainCode), 13);
+    data.set(hexToBytes(pubKey), 45);
+    return cryptoUtils.base58check(data);
+  },
+  base58Decode: (str) => {
+    try {
+      const decoded = bs58.decode(str);
+      return bytesToHex(decoded);
+    } catch (e) {
+      throw new Error("Invalid Base58 string");
+    }
+  },
+  bech32Decode: (str) => {
+    try {
+      let decoded;
+      try {
+        decoded = bech32.decode(str, 1024);
+      } catch (e) {
+        decoded = bech32m.decode(str, 1024);
+      }
+      const { prefix, words } = decoded;
+      const version = words[0];
+      const data = bech32.fromWords(words.slice(1));
+      return { prefix, version, hex: bytesToHex(data) };
+    } catch (e) {
+      throw new Error("Invalid Bech32/m string");
+    }
   }
 };
