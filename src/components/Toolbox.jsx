@@ -155,7 +155,7 @@ export default function Toolbox() {
   return (
     <div className="bg-white dark:bg-gray-800 p-6 rounded-2xl shadow-sm border border-gray-200 dark:border-gray-700 h-full flex flex-col">
       <h3 className="text-lg font-bold mb-4 flex items-center gap-2 text-black dark:text-white">
-        <span className="text-blue-500">⚡</span> Live Calculator
+        <span className="text-[var(--primary-color)]">⚡</span> Live Calculator
       </h3>
       
       <div className="space-y-4 flex-1 overflow-y-auto">
@@ -180,7 +180,7 @@ export default function Toolbox() {
                 setInputs({ primary: '', secondary: '', extra: '', secondary_extra: '' });
               }
             }}
-            className="w-full bg-white dark:bg-black border-2 border-gray-200 dark:border-gray-700 rounded-2xl p-3 outline-none focus:ring-2 ring-blue-500/20 transition-all font-medium text-black dark:text-white"
+            className="w-full bg-white dark:bg-black border-2 border-gray-200 dark:border-gray-700 rounded-2xl p-3 outline-none focus:ring-2 ring-[var(--primary-color)]/20 transition-all font-medium text-black dark:text-white"
           >
             <option>Base Converter</option>
             <option>Base58 Decode</option>
@@ -199,8 +199,8 @@ export default function Toolbox() {
             <option>Taproot Tweak</option>
           </select>
           
-          <div className="mt-2 p-3 bg-blue-50/50 dark:bg-blue-900/10 border border-blue-100 dark:border-blue-800/50 rounded-xl">
-            <p className="text-xs text-blue-600 dark:text-blue-400 font-medium mb-1">💡 {getAlgoDetails(algo).desc}</p>
+          <div className="mt-2 p-3 bg-[var(--primary-bg)] border border-[var(--primary-color)]/20 rounded-xl">
+            <p className="text-xs text-[var(--primary-color)] font-medium mb-1">💡 {getAlgoDetails(algo).desc}</p>
             {getAlgoDetails(algo).formula && (
               <p className="text-[10px] text-gray-500 dark:text-gray-400 font-mono bg-white dark:bg-black p-2 rounded-lg border border-gray-100 dark:border-gray-800 mt-2">
                 <span className="text-purple-500 font-bold mr-2">fn(x)</span> 
@@ -219,7 +219,7 @@ export default function Toolbox() {
               value={inputs.primary}
               onChange={(e) => setInputs({ ...inputs, primary: e.target.value })}
               placeholder="Enter value..."
-              className="w-full bg-white dark:bg-black border-2 border-gray-200 dark:border-gray-700 rounded-2xl p-3 font-mono text-sm h-24 resize-none outline-none focus:ring-2 ring-blue-500/20 transition-all shadow-inner placeholder:text-gray-400 text-black dark:text-white"
+              className="w-full bg-white dark:bg-black border-2 border-gray-200 dark:border-gray-700 rounded-2xl p-3 font-mono text-sm h-24 resize-none outline-none focus:ring-2 ring-[var(--primary-color)]/20 transition-all shadow-inner placeholder:text-gray-400 text-black dark:text-white"
             />
           </div>
 
@@ -232,7 +232,7 @@ export default function Toolbox() {
                 value={inputs.secondary}
                 onChange={(e) => setInputs({ ...inputs, secondary: e.target.value })}
                 placeholder="Enter value..."
-                className="w-full bg-white dark:bg-black border-2 border-gray-200 dark:border-gray-700 rounded-2xl p-3 font-mono text-sm h-24 resize-none outline-none focus:ring-2 ring-blue-500/20 transition-all shadow-inner placeholder:text-gray-400 text-black dark:text-white"
+                className="w-full bg-white dark:bg-black border-2 border-gray-200 dark:border-gray-700 rounded-2xl p-3 font-mono text-sm h-24 resize-none outline-none focus:ring-2 ring-[var(--primary-color)]/20 transition-all shadow-inner placeholder:text-gray-400 text-black dark:text-white"
               />
             </div>
           )}
@@ -270,7 +270,7 @@ export default function Toolbox() {
                 <select 
                   value={inputs.secondary}
                   onChange={(e) => setInputs({ ...inputs, secondary: e.target.value })}
-                  className="w-full bg-white dark:bg-black border-2 border-gray-200 dark:border-gray-700 rounded-2xl p-3 outline-none focus:ring-2 ring-blue-500/20 transition-all font-medium text-black dark:text-white"
+                  className="w-full bg-white dark:bg-black border-2 border-gray-200 dark:border-gray-700 rounded-2xl p-3 outline-none focus:ring-2 ring-[var(--primary-color)]/20 transition-all font-medium text-black dark:text-white"
                 >
                   <option value="2">2 (Binary)</option>
                   <option value="10">10 (Decimal)</option>
@@ -281,7 +281,7 @@ export default function Toolbox() {
                   value={inputs.extra || ''}
                   onChange={(e) => setInputs({ ...inputs, extra: e.target.value })}
                   placeholder={isBech32 ? "e.g. bc" : algo === 'PBKDF2' ? "2048" : "Enter value..."}
-                  className="w-full bg-white dark:bg-black border-2 border-gray-200 dark:border-gray-700 rounded-2xl p-3 font-mono text-sm h-16 resize-none outline-none focus:ring-2 ring-blue-500/20 transition-all shadow-inner placeholder:text-gray-400 text-black dark:text-white"
+                  className="w-full bg-white dark:bg-black border-2 border-gray-200 dark:border-gray-700 rounded-2xl p-3 font-mono text-sm h-16 resize-none outline-none focus:ring-2 ring-[var(--primary-color)]/20 transition-all shadow-inner placeholder:text-gray-400 text-black dark:text-white"
                 />
               )}
             </div>
@@ -296,7 +296,7 @@ export default function Toolbox() {
                 <select 
                   value={inputs.extra}
                   onChange={(e) => setInputs({ ...inputs, extra: e.target.value })}
-                  className="w-full bg-white dark:bg-black border-2 border-gray-200 dark:border-gray-700 rounded-2xl p-3 outline-none focus:ring-2 ring-blue-500/20 transition-all font-medium text-black dark:text-white"
+                  className="w-full bg-white dark:bg-black border-2 border-gray-200 dark:border-gray-700 rounded-2xl p-3 outline-none focus:ring-2 ring-[var(--primary-color)]/20 transition-all font-medium text-black dark:text-white"
                 >
                   <option value="2">2 (Binary)</option>
                   <option value="10">10 (Decimal)</option>
@@ -307,7 +307,7 @@ export default function Toolbox() {
                   value={inputs.secondary_extra || ''}
                   onChange={(e) => setInputs({ ...inputs, secondary_extra: e.target.value })}
                   placeholder="64"
-                  className="w-full bg-white dark:bg-black border-2 border-gray-200 dark:border-gray-700 rounded-2xl p-3 font-mono text-sm h-16 resize-none outline-none focus:ring-2 ring-blue-500/20 transition-all shadow-inner placeholder:text-gray-400 text-black dark:text-white"
+                  className="w-full bg-white dark:bg-black border-2 border-gray-200 dark:border-gray-700 rounded-2xl p-3 font-mono text-sm h-16 resize-none outline-none focus:ring-2 ring-[var(--primary-color)]/20 transition-all shadow-inner placeholder:text-gray-400 text-black dark:text-white"
                 />
               )}
             </div>
@@ -338,7 +338,7 @@ export default function Toolbox() {
 
       <div className="mt-6 pt-6 border-t border-gray-100 dark:border-gray-700/50 flex flex-col items-center gap-4">
         <div className="text-[10px] text-gray-400 uppercase tracking-[0.2em]">
-          Vibe coding by <a href="https://www.facebook.com/takrudcrypto21" target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:text-blue-400 font-bold transition-colors">ขิงว่านะ</a>
+          Vibe coding by <a href="https://www.facebook.com/takrudcrypto21" target="_blank" rel="noopener noreferrer" className="text-[var(--primary-color)] hover:opacity-80 font-bold transition-all">ขิงว่านะ</a>
         </div>
         
         <a 

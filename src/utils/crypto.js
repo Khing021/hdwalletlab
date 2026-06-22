@@ -26,7 +26,7 @@ export const bytesToHex = (bytes) => {
 
 // Cryptographic Wrapper
 export const cryptoUtils = {
-  sha256: (data) => bytesToHex(sha256(typeof data === 'string' ? data : data)),
+  sha256: (data) => bytesToHex(sha256(typeof data === 'string' ? new TextEncoder().encode(data) : data)),
   ripemd160: (data) => bytesToHex(ripemd160(data)),
   hash160: (data) => bytesToHex(ripemd160(sha256(data))),
   hmacSha512: (key, data) => bytesToHex(hmac(sha512, key, data)),
@@ -176,5 +176,21 @@ export const cryptoUtils = {
     } catch (e) {
       throw new Error("Invalid Bech32/m string");
     }
+  },
+  toLittleEndian: (num, bytes) => {
+    const b = new Uint8Array(bytes);
+    const view = new DataView(b.buffer);
+    if (bytes === 4) view.setUint32(0, num, true);
+    else if (bytes === 8) {
+      const low = num % 0x100000000;
+      const high = Math.floor(num / 0x100000000);
+      view.setUint32(0, low, true);
+      view.setUint32(4, high, true);
+    }
+    return bytesToHex(b);
+  },
+  sign: (privKeyHex, msgHashHex) => {
+    const sig = secp256k1.sign(msgHashHex, privKeyHex);
+    return sig.toDERHex();
   }
 };

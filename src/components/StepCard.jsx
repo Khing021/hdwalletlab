@@ -9,7 +9,7 @@ export default function StepCard({ number, title, isActive, isLocked, isComplete
     }`}>
       <div className={`p-8 rounded-3xl border-2 transition-all ${
         isActive 
-          ? 'border-blue-500 bg-blue-50/5 shadow-2xl shadow-blue-500/10 scale-[1.02]' 
+          ? 'border-[var(--primary-color)] bg-[var(--primary-bg)] shadow-2xl shadow-[var(--primary-glow)] scale-[1.02]' 
           : isCompleted
             ? 'border-green-500/30 bg-green-50/5'
             : 'border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-900'
@@ -17,7 +17,7 @@ export default function StepCard({ number, title, isActive, isLocked, isComplete
         <div className="flex justify-between items-start mb-6">
           <div className="flex items-center gap-4">
             <span className={`w-10 h-10 rounded-2xl flex items-center justify-center font-bold text-lg transition-colors ${
-              isActive ? 'bg-blue-500 text-white' : isCompleted ? 'bg-green-500 text-white' : 'bg-gray-100 dark:bg-gray-800 text-gray-400'
+              isActive ? 'bg-[var(--primary-color)] text-white' : isCompleted ? 'bg-green-500 text-white' : 'bg-gray-100 dark:border-gray-800 text-gray-400'
             }`}>
               {number}
             </span>
@@ -26,7 +26,7 @@ export default function StepCard({ number, title, isActive, isLocked, isComplete
           {hint && !isLocked && (
             <button 
               onClick={() => setShowHint(!showHint)}
-              className="text-xs font-bold uppercase tracking-widest text-blue-500 hover:text-blue-600 transition-colors"
+              className="text-xs font-bold uppercase tracking-widest text-[var(--primary-color)] hover:opacity-80 transition-opacity"
             >
               {showHint ? 'Hide Hint' : 'Get Hint'}
             </button>
