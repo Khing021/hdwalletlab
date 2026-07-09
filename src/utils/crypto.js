@@ -2,7 +2,7 @@ import { sha256, sha512 } from '@noble/hashes/sha2.js';
 import { ripemd160 } from '@noble/hashes/legacy.js';
 import { hmac } from '@noble/hashes/hmac.js';
 import { pbkdf2 } from '@noble/hashes/pbkdf2.js';
-import { secp256k1 } from '@noble/curves/secp256k1.js';
+import { secp256k1, schnorr } from '@noble/curves/secp256k1.js';
 import { bech32, bech32m } from 'bech32';
 import bs58 from 'bs58';
 
@@ -26,7 +26,11 @@ export const bytesToHex = (bytes) => {
 
 // Cryptographic Wrapper
 export const cryptoUtils = {
-  sha256: (data) => bytesToHex(sha256(typeof data === 'string' ? new TextEncoder().encode(data) : data)),
+  sha256: (data) => bytesToHex(sha256(typeof data === 'string' ? (data.startsWith('0x') || /^[0-9a-fA-F]+$/.test(data) && data.length % 2 === 0 ? hexToBytes(data) : new TextEncoder().encode(data)) : data)),
+  doubleSha256: (data) => {
+    const d = typeof data === 'string' ? (data.startsWith('0x') || (/^[0-9a-fA-F]+$/.test(data) && data.length % 2 === 0) ? hexToBytes(data) : new TextEncoder().encode(data)) : data;
+    return bytesToHex(sha256(sha256(d)));
+  },
   ripemd160: (data) => bytesToHex(ripemd160(data)),
   hash160: (data) => bytesToHex(ripemd160(sha256(data))),
   hmacSha512: (key, data) => bytesToHex(hmac(sha512, key, data)),
@@ -190,7 +194,29 @@ export const cryptoUtils = {
     return bytesToHex(b);
   },
   sign: (privKeyHex, msgHashHex) => {
-    const sig = secp256k1.sign(msgHashHex, privKeyHex);
-    return sig.toDERHex();
+    const sigBytes = secp256k1.sign(hexToBytes(msgHashHex), hexToBytes(privKeyHex));
+    const sigObj = secp256k1.Signature.fromBytes(sigBytes);
+    
+    let rHex = sigObj.r.toString(16);
+    if (rHex.length % 2 !== 0) rHex = '0' + rHex;
+    if (parseInt(rHex.slice(0, 2), 16) >= 0x80) rHex = '00' + rHex;
+
+    let sHex = sigObj.s.toString(16);
+    if (sHex.length % 2 !== 0) sHex = '0' + sHex;
+    if (parseInt(sHex.slice(0, 2), 16) >= 0x80) sHex = '00' + sHex;
+
+    const rLen = (rHex.length / 2).toString(16).padStart(2, '0');
+    const sLen = (sHex.length / 2).toString(16).padStart(2, '0');
+
+    const rPart = '02' + rLen + rHex;
+    const sPart = '02' + sLen + sHex;
+
+    const totalLen = ((rPart.length + sPart.length) / 2).toString(16).padStart(2, '0');
+    
+    return '30' + totalLen + rPart + sPart + '01'; // append SIGHASH_ALL
+  },
+  schnorrSign: (privKeyHex, msgHashHex) => {
+    // For Taproot, we use schnorr signatures
+    return bytesToHex(schnorr.sign(hexToBytes(msgHashHex), hexToBytes(privKeyHex)));
   }
 };

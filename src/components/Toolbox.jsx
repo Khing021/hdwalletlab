@@ -23,6 +23,10 @@ export default function Toolbox() {
       case 'Base58Check': return { desc: "เข้ารหัส Address ยุคดั้งเดิม (Legacy/Nested Segwit) ด้วย Base58", formula: "Base58(Data + SHA256(SHA256(Data))[0:4])" };
       case 'Taproot Tweak': return { desc: "ปรับแต่ง Public Key แบบอัตโนมัติตามกฎ BIP341", formula: "Q = P + (tweakHash * G)" };
       case 'SHA-256': return { desc: "อัลกอริทึมแฮชแบบดั้งเดิม 256 บิต", formula: "SHA256(Data)" };
+      case 'Double SHA-256': return { desc: "แฮชสองรอบ (ใช้สร้าง Sighash)", formula: "SHA256(SHA256(Data))" };
+      case 'ECDSA Sign': return { desc: "เซ็นข้อความด้วย Private Key (พร้อมเติม SIGHASH_ALL)", formula: "DER(Sign(Priv, MsgHash)) + 01" };
+      case 'Schnorr Sign': return { desc: "เซ็นข้อความสำหรับ Taproot (BIP340)", formula: "Schnorr(Priv, MsgHash)" };
+      case 'Little Endian Converter': return { desc: "สลับ Byte order สำหรับตัวเลข", formula: "ReverseBytes(Hex)" };
       case 'Base58 Decode': return { desc: "ถอดรหัส Base58 เพื่อดูข้อมูลดิบ (Hex)" };
       case 'Bech32 Decode': return { desc: "ถอดรหัส Bech32/m เพื่อดู HRP, Version และ Payload" };
       case 'HASH-160': return { desc: "อัลกอริทึมแฮชสั้น 160 บิต สำหรับสร้าง Address P2PKH/P2SH", formula: "RIPEMD160(SHA256(Data))" };
@@ -58,6 +62,29 @@ export default function Toolbox() {
           case 'SHA-256':
             result = cryptoUtils.sha256(data);
             break;
+          case 'Double SHA-256':
+            result = cryptoUtils.doubleSha256(data);
+            break;
+          case 'ECDSA Sign':
+            result = cryptoUtils.sign(inputs.primary.trim(), inputs.secondary.trim());
+            break;
+          case 'Schnorr Sign':
+            result = cryptoUtils.schnorrSign(inputs.primary.trim(), inputs.secondary.trim());
+            break;
+          case 'Little Endian Converter': {
+            const numStr = inputs.primary.replace(/\s/g, '').replace(/^0x/i, '');
+            let hexStr = numStr;
+            // If it's a pure decimal number without hex characters, treat it as decimal
+            if (/^\d+$/.test(numStr) && !inputs.primary.trim().toLowerCase().startsWith('0x')) {
+               hexStr = BigInt(numStr).toString(16);
+            } else {
+               hexStr = BigInt('0x' + numStr).toString(16);
+            }
+            const bytes = parseInt(inputs.secondary) || (hexStr.length > 16 ? 32 : 4);
+            const paddedHex = hexStr.padStart(bytes * 2, '0');
+            result = paddedHex.match(/.{2}/g).reverse().join('');
+            break;
+          }
           case 'RIPEMD-160':
             result = cryptoUtils.ripemd160(data);
             break;
@@ -188,12 +215,16 @@ export default function Toolbox() {
             <option>Bech32 Decode</option>
             <option>Bech32/m Encode</option>
             <option>BigInt Add (Mod N)</option>
+            <option>Double SHA-256</option>
             <option>EC-Multiply</option>
             <option>EC-Point-Add</option>
+            <option>ECDSA Sign</option>
             <option>HASH-160</option>
             <option>HMAC-SHA512</option>
+            <option>Little Endian Converter</option>
             <option>PBKDF2</option>
             <option>RIPEMD-160</option>
+            <option>Schnorr Sign</option>
             <option>SHA-256</option>
             <option>Tagged Hash</option>
             <option>Taproot Tweak</option>
@@ -223,10 +254,10 @@ export default function Toolbox() {
             />
           </div>
 
-          {hasSecondary && !isBech32 && !isBaseConv && (
+          {(hasSecondary || algo === 'ECDSA Sign' || algo === 'Schnorr Sign' || algo === 'Little Endian Converter') && !isBech32 && !isBaseConv && (
             <div>
               <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-2">
-                {algo === 'PBKDF2' ? 'Salt' : isBIP32Math || algo === 'EC-Point-Add' ? 'Value B (Hex)' : algo === 'Tagged Hash' ? 'Tag Name' : 'Key'}
+                {algo === 'PBKDF2' ? 'Salt' : isBIP32Math || algo === 'EC-Point-Add' ? 'Value B (Hex)' : algo === 'Tagged Hash' ? 'Tag Name' : algo === 'ECDSA Sign' || algo === 'Schnorr Sign' ? 'Message Hash (Hex)' : algo === 'Little Endian Converter' ? 'Bytes Length (4 or 8)' : 'Key'}
               </label>
               <textarea 
                 value={inputs.secondary}

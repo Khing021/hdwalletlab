@@ -1,12 +1,22 @@
-import { useState, useMemo } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { cryptoUtils } from './utils/crypto';
 import Toolbox from './components/Toolbox';
 import KeyDerivationJourney from './components/KeyDerivationJourney';
 import TransactionJourney from './components/TransactionJourney';
 
 function App() {
-  const [journey, setJourney] = useState('derivation');
+  const [journey, setJourney] = useState(() => {
+    return window.location.hash === '#transaction' ? 'transaction' : 'derivation';
+  });
   const [isDark, setIsDark] = useState(true);
+
+  useEffect(() => {
+    const handleHashChange = () => {
+      setJourney(window.location.hash === '#transaction' ? 'transaction' : 'derivation');
+    };
+    window.addEventListener('hashchange', handleHashChange);
+    return () => window.removeEventListener('hashchange', handleHashChange);
+  }, []);
 
   const toggleTheme = () => setIsDark(!isDark);
 
@@ -43,9 +53,12 @@ function App() {
             </div>
 
             {/* ซ่อนปุ่มสลับหน้าโดยการเติม/ลบคำว่า hidden ใน classname */}
-            <nav className="hidden flex bg-gray-100 dark:bg-gray-900/50 p-1 rounded-2xl border border-gray-200 dark:border-gray-800 shadow-inner">
+            <nav className="flex bg-gray-100 dark:bg-gray-900/50 p-1 rounded-2xl border border-gray-200 dark:border-gray-800 shadow-inner">
               <button
-                onClick={() => setJourney('derivation')}
+                onClick={() => {
+                  setJourney('derivation');
+                  window.history.replaceState(null, '', '#derivation');
+                }}
                 className={`px-6 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${journey === 'derivation'
                   ? 'bg-white dark:bg-gray-800 text-blue-500 shadow-sm'
                   : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-200'
@@ -54,7 +67,10 @@ function App() {
                 Key Derivation
               </button>
               <button
-                onClick={() => setJourney('transaction')}
+                onClick={() => {
+                  setJourney('transaction');
+                  window.history.replaceState(null, '', '#transaction');
+                }}
                 className={`px-6 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${journey === 'transaction'
                   ? 'bg-white dark:bg-gray-800 text-purple-500 shadow-sm'
                   : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-200'
