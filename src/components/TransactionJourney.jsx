@@ -387,6 +387,8 @@ function TransactionJourney() {
         const outpoint = step4[i].txid + step4[i].vout;
         const pubKeyHash = cryptoUtils.hash160(hexToBytes(key?.pub || ""));
         const scriptCode = `1976a914${pubKeyHash}88ac`;
+        const inputAmount = inp.value || 0;
+        const amountLE = cryptoUtils.toLittleEndian(inputAmount, 8);
 
         parts.push({ label: 'Version', value: version, desc: '4 Bytes LE' });
         parts.push({ label: 'HashPrevouts', value: hashPrevouts, desc: 'Double SHA-256 of all outpoints' });
@@ -394,13 +396,13 @@ function TransactionJourney() {
         parts.push({ label: 'Outpoint', value: outpoint, desc: 'Current Input TxID + Vout' });
         parts.push({ label: 'ScriptCode Len', value: "19", desc: 'Length of ScriptCode' });
         parts.push({ label: 'ScriptCode', value: scriptCode.substring(2), desc: 'P2PKH of this input' });
-        parts.push({ label: 'Amount', value: cryptoUtils.toLittleEndian(step4[i].value, 8), desc: '8 Bytes LE' });
+        parts.push({ label: 'Amount', value: amountLE, desc: '8 Bytes LE from the selected UTXO' });
         parts.push({ label: 'nSequence', value: step4[i].sequence, desc: '4 Bytes' });
         parts.push({ label: 'HashOutputs', value: hashOutputs, desc: 'Double SHA-256 of all outputs' });
         parts.push({ label: 'Locktime', value: locktime, desc: '4 Bytes LE' });
         parts.push({ label: 'Sighash Type', value: userHashType, desc: '4 Bytes LE' });
 
-        preimage = version + hashPrevouts + hashSequence + outpoint + scriptCode + cryptoUtils.toLittleEndian(step4[i].value, 8) + step4[i].sequence + hashOutputs + locktime + userHashType;
+        preimage = version + hashPrevouts + hashSequence + outpoint + scriptCode + amountLE + step4[i].sequence + hashOutputs + locktime + userHashType;
         message = cryptoUtils.doubleSha256(preimage);
         if (key) sig = cryptoUtils.sign(key.priv, message) + userHashType.substring(0, 2);
       } else if (type === "taproot") {
@@ -415,10 +417,10 @@ function TransactionJourney() {
         parts.push({ label: 'HashScriptPubKeys', value: hashSpksTaproot, desc: 'SHA-256 of all SPKs' });
         parts.push({ label: 'HashSequence', value: hashSequenceTaproot, desc: 'SHA-256 of all nSequences' });
         parts.push({ label: 'HashOutputs', value: hashOutputsTaproot, desc: 'SHA-256 of all outputs' });
-        parts.push({ label: 'Spend Type / Ext', value: "00000000", desc: 'Key Path (00) + Extensions' });
+        parts.push({ label: 'Spend Type / Ext', value: "00", desc: 'Key Path (00) + No Annex / No Extensions' });
         parts.push({ label: 'Input Index', value: inputIndexHex, desc: '4 Bytes LE' });
 
-        preimage = "00" + userHashType + version + locktime + hashPrevoutsTaproot + hashAmountsTaproot + hashSpksTaproot + hashSequenceTaproot + hashOutputsTaproot + "00000000" + inputIndexHex;
+        preimage = "00" + userHashType + version + locktime + hashPrevoutsTaproot + hashAmountsTaproot + hashSpksTaproot + hashSequenceTaproot + hashOutputsTaproot + "00" + inputIndexHex;
         message = cryptoUtils.taggedHash("TapSighash", hexToBytes(preimage));
         if (key) sig = cryptoUtils.schnorrSign(key.priv, message);
         if (userHashType !== "00" && key) sig += userHashType.substring(0, 2);
