@@ -228,8 +228,10 @@ export const cryptoUtils = {
     return '30' + totalLen + rPart + sPart + '01'; // append SIGHASH_ALL
   },
   schnorrSign: (privKeyHex, msgHashHex) => {
-    // For Taproot, we use schnorr signatures
-    return bytesToHex(schnorr.sign(hexToBytes(msgHashHex), hexToBytes(privKeyHex)));
+    // Use zero auxRand so signatures are deterministic across runs
+    const auxRand = new Uint8Array(32);
+    return bytesToHex(schnorr.sign(hexToBytes(msgHashHex), hexToBytes(privKeyHex), auxRand));
   }
 };
+
 
