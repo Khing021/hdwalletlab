@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react';
+﻿import { useState, useMemo, useEffect } from 'react';
 import { cryptoUtils, hexToBytes, bytesToHex } from '../utils/crypto';
 import StepCard from './StepCard';
 
@@ -69,7 +69,7 @@ function TransactionJourney() {
         changed = true;
       }
       if (!next.step8Sigs || next.step8Sigs.length !== prev.utxos.length) {
-        next.step8Sigs = prev.utxos.map((u, i) => (next.step8Sigs && next.step8Sigs[i]) || { priv: '', signature: '' });
+        next.step8Sigs = prev.utxos.map((u, i) => (next.step8Sigs && next.step8Sigs[i]) || { priv: '', tweakedPriv: '', signature: '' });
         changed = true;
       }
       if (!next.step10Txid) {
@@ -332,6 +332,13 @@ function TransactionJourney() {
     const inputTypes = [];
     const expectedPreimageParts = [];
 
+    const deriveTaprootTweakedPriv = (privHex, pubHex) => {
+      if (!privHex || !pubHex) return "";
+      const xOnly = pubHex.startsWith('02') || pubHex.startsWith('03') ? pubHex.substring(2) : pubHex;
+      const tweakScalar = cryptoUtils.taprootTweakScalar(xOnly);
+      return cryptoUtils.bigIntAddModN(privHex, tweakScalar);
+    };
+
     inputs.forEach((inp, i) => {
       let type = "unknown";
       if (inp.addr.startsWith('1')) type = "legacy";
@@ -422,12 +429,13 @@ function TransactionJourney() {
 
         preimage = "00" + userHashType + version + locktime + hashPrevoutsTaproot + hashAmountsTaproot + hashSpksTaproot + hashSequenceTaproot + hashOutputsTaproot + "00" + inputIndexHex;
         message = cryptoUtils.taggedHash("TapSighash", hexToBytes(preimage));
-        if (key) sig = cryptoUtils.schnorrSign(key.priv, message);
-        if (userHashType !== "00" && key) sig += userHashType.substring(0, 2);
+        const tweakedPriv = deriveTaprootTweakedPriv(key?.priv || "", key?.pub || "");
+        if (tweakedPriv) sig = cryptoUtils.schnorrSign(tweakedPriv, message);
+        if (userHashType !== "00" && sig) sig += userHashType.substring(0, 2);
       }
 
       step7.push({ type: userHashType, preimage, message });
-      step8.push({ priv: key ? key.priv : "", signature: sig });
+      step8.push({ priv: key ? key.priv : "", tweakedPriv: type === "taproot" ? deriveTaprootTweakedPriv(key?.priv || "", key?.pub || "") : "", signature: sig });
       expectedPreimageParts.push(parts);
     });
 
@@ -668,11 +676,15 @@ function TransactionJourney() {
   const isStep8Valid = txData.utxos.length > 0 && txData.utxos.every((u, i) => {
     const s = txData.step8Sigs?.[i];
     const e = expectedData.step8?.[i];
-    return s && e && s.priv === e.priv && s.signature === e.signature;
+    const type = expectedData.inputTypes?.[i];
+    if (!s || !e) return false;
+    if (type === 'taproot') return s.priv === e.priv && s.tweakedPriv === e.tweakedPriv && s.signature === e.signature;
+    return s.priv === e.priv && s.signature === e.signature;
   });
 
-  const isStep9Valid = txData.finalTx === expectedData.finalTx;
 
+
+  const isStep9Valid = txData.finalTx === expectedData.finalTx;
   const isStep10Valid = txData.step10Txid?.base === expectedData.txidBase && txData.step10Txid?.hash === expectedData.txid;
 
   const checkCheatCode = (e, expectedValue, setter) => {
@@ -1395,32 +1407,48 @@ function TransactionJourney() {
           <p className="text-gray-400 text-sm">การเซ็นลายเซ็นยืนยันการทำธุรกรรม หากเป็น Legacy/SegWit จะใช้ ECDSA (เพิ่ม 01 ต่อท้ายถ้าเป็น SIGHASH_ALL) แต่ถ้าเป็น Taproot จะใช้ Schnorr Signature</p>
 
           <div className="space-y-6">
-            {txData.utxos.map((u, i) => (
-              <div key={`sig-${i}`} className="p-4 bg-black/40 border border-purple-500/20 rounded-2xl space-y-4">
-                <div className="flex justify-between items-center border-b border-purple-500/10 pb-2">
-                  <span className="text-xs font-bold text-gray-400 uppercase">Input #{i + 1} ({expectedData.inputTypes?.[i]?.toUpperCase()})</span>
-                  <span className="text-[10px] font-mono text-pink-400">{expectedData.inputTypes?.[i] === 'taproot' ? 'Schnorr' : 'ECDSA (DER+Sighash Byte)'}</span>
+            {txData.utxos.map((u, i) => {
+              const step8Expected = expectedData.step8?.[i] || {};
+              const inputType = expectedData.inputTypes?.[i];
+              const isTaproot = inputType === 'taproot';
+              return (
+                <div key={`sig-${i}`} className="p-4 bg-black/40 border border-purple-500/20 rounded-2xl space-y-4">
+                  <div className="flex justify-between items-center border-b border-purple-500/10 pb-2">
+                    <span className="text-xs font-bold text-gray-400 uppercase">Input #{i + 1} ({expectedData.inputTypes?.[i]?.toUpperCase()})</span>
+                    <span className="text-[10px] font-mono text-pink-400">{isTaproot ? 'Schnorr' : 'ECDSA (DER+Sighash Byte)'}</span>
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold text-gray-500 tracking-widest">Private Key (Hex)</label>
+                    <input type="text" className={`w-full mt-2 bg-black/40 border-2 rounded-xl p-3 text-sm font-mono outline-none transition-all ${txData.step8Sigs?.[i]?.priv === step8Expected.priv ? 'border-green-500 text-green-400' : 'border-purple-500/20 text-purple-200 focus:border-purple-500'}`} placeholder="32 byte hex" value={txData.step8Sigs?.[i]?.priv || ''} onChange={(e) => {
+                      const newArr = [...(txData.step8Sigs || [])];
+                      if (checkCheatCode(e, step8Expected.priv, (v) => { newArr[i] = { ...newArr[i], priv: v }; setTxData({ ...txData, step8Sigs: newArr }); })) return;
+                      newArr[i] = { ...newArr[i], priv: e.target.value.toLowerCase().replace(/\s/g, '') };
+                      setTxData({ ...txData, step8Sigs: newArr });
+                    }} />
+                  </div>
+                  {isTaproot && (
+                    <div>
+                      <label className="text-[10px] font-bold text-gray-500 tracking-widest">Tweaked Private Key (Hex)</label>
+                      <input type="text" className={`w-full mt-2 bg-black/40 border-2 rounded-xl p-3 text-sm font-mono outline-none transition-all ${txData.step8Sigs?.[i]?.tweakedPriv === step8Expected.tweakedPriv ? 'border-green-500 text-green-400' : 'border-purple-500/20 text-purple-200 focus:border-purple-500'}`} placeholder="32 byte hex" value={txData.step8Sigs?.[i]?.tweakedPriv || ''} onChange={(e) => {
+                        const newArr = [...(txData.step8Sigs || [])];
+                        if (checkCheatCode(e, step8Expected.tweakedPriv, (v) => { newArr[i] = { ...newArr[i], tweakedPriv: v }; setTxData({ ...txData, step8Sigs: newArr }); })) return;
+                        newArr[i] = { ...newArr[i], tweakedPriv: e.target.value.toLowerCase().replace(/\s/g, '') };
+                        setTxData({ ...txData, step8Sigs: newArr });
+                      }} />
+                    </div>
+                  )}
+                  <div>
+                    <label className="text-[10px] font-bold text-gray-500 tracking-widest">Signature Hex</label>
+                    <textarea className={`w-full mt-2 bg-black/40 border-2 rounded-xl p-3 text-sm font-mono outline-none transition-all resize-none h-24 break-all ${txData.step8Sigs?.[i]?.signature === step8Expected.signature ? 'border-green-500 text-green-400' : 'border-purple-500/20 text-purple-200 focus:border-purple-500'}`} placeholder="Hex" value={txData.step8Sigs?.[i]?.signature || ''} onChange={(e) => {
+                      const newArr = [...(txData.step8Sigs || [])];
+                      if (checkCheatCode(e, step8Expected.signature, (v) => { newArr[i] = { ...newArr[i], signature: v }; setTxData({ ...txData, step8Sigs: newArr }); })) return;
+                      newArr[i] = { ...newArr[i], signature: e.target.value.toLowerCase().replace(/\s/g, '') };
+                      setTxData({ ...txData, step8Sigs: newArr });
+                    }} />
+                  </div>
                 </div>
-                <div>
-                  <label className="text-[10px] font-bold text-gray-500 tracking-widest">Private Key (Hex)</label>
-                  <input type="text" className={`w-full mt-2 bg-black/40 border-2 rounded-xl p-3 text-sm font-mono outline-none transition-all ${txData.step8Sigs?.[i]?.priv === expectedData.step8?.[i]?.priv ? 'border-green-500 text-green-400' : 'border-purple-500/20 text-purple-200 focus:border-purple-500'}`} placeholder="32 byte hex" value={txData.step8Sigs?.[i]?.priv || ''} onChange={(e) => {
-                    const newArr = [...(txData.step8Sigs || [])];
-                    if (checkCheatCode(e, expectedData.step8[i].priv, (v) => { newArr[i] = { ...newArr[i], priv: v }; setTxData({ ...txData, step8Sigs: newArr }); })) return;
-                    newArr[i] = { ...newArr[i], priv: e.target.value.toLowerCase().replace(/\s/g, '') };
-                    setTxData({ ...txData, step8Sigs: newArr });
-                  }} />
-                </div>
-                <div>
-                  <label className="text-[10px] font-bold text-gray-500 tracking-widest">Signature Hex</label>
-                  <textarea className={`w-full mt-2 bg-black/40 border-2 rounded-xl p-3 text-sm font-mono outline-none transition-all resize-none h-24 break-all ${txData.step8Sigs?.[i]?.signature === expectedData.step8?.[i]?.signature ? 'border-green-500 text-green-400' : 'border-purple-500/20 text-purple-200 focus:border-purple-500'}`} placeholder="Hex" value={txData.step8Sigs?.[i]?.signature || ''} onChange={(e) => {
-                    const newArr = [...(txData.step8Sigs || [])];
-                    if (checkCheatCode(e, expectedData.step8[i].signature, (v) => { newArr[i] = { ...newArr[i], signature: v }; setTxData({ ...txData, step8Sigs: newArr }); })) return;
-                    newArr[i] = { ...newArr[i], signature: e.target.value.toLowerCase().replace(/\s/g, '') };
-                    setTxData({ ...txData, step8Sigs: newArr });
-                  }} />
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
 
           <div className="flex justify-center pt-4">
@@ -1428,7 +1456,6 @@ function TransactionJourney() {
           </div>
         </div>
       </StepCard>
-
       <StepCard number="09" title="Final Assembly" isActive={step === 9} isLocked={step < 9} isCompleted={step > 9} hint="นำโครงสร้างธุรกรรม (Skeleton) จากด่านที่ 6 มาแทรกลายเซ็น หรือต่อท้ายด้วย Witness">
         <div className="space-y-6">
           <p className="text-gray-400 text-sm">รวมทุกชิ้นส่วนเข้าด้วยกัน: Version + Marker/Flag (SegWit) + Vin Size + Inputs (พร้อม ScriptSig ถ้ามี) + Vout Size + Outputs + Witness Data (SegWit) + Locktime</p>

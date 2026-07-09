@@ -1,4 +1,4 @@
-import { sha256, sha512 } from '@noble/hashes/sha2.js';
+﻿import { sha256, sha512 } from '@noble/hashes/sha2.js';
 import { ripemd160 } from '@noble/hashes/legacy.js';
 import { hmac } from '@noble/hashes/hmac.js';
 import { pbkdf2 } from '@noble/hashes/pbkdf2.js';
@@ -104,6 +104,12 @@ export const cryptoUtils = {
     };
   },
   // Taproot Tweaking (BIP341)
+  taprootTweakScalar: (xOnlyPubKeyHex) => {
+    const tagHash = sha256(new TextEncoder().encode('TapTweak'));
+    const xOnly = hexToBytes(xOnlyPubKeyHex);
+    const tweakHash = sha256(new Uint8Array([...tagHash, ...tagHash, ...xOnly]));
+    return bytesToHex(tweakHash);
+  },
   taprootTweak: (pubKeyBytes) => {
     const xOnly = pubKeyBytes.slice(1); // X-only is just the X coordinate
     const tag = "TapTweak";
@@ -193,6 +199,12 @@ export const cryptoUtils = {
     }
     return bytesToHex(b);
   },
+  bigIntAddModN: (aHex, bHex) => {
+    const n = BigInt('0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141');
+    const a = BigInt('0x' + aHex);
+    const b = BigInt('0x' + bHex);
+    return ((a + b) % n).toString(16).padStart(64, '0');
+  },
   sign: (privKeyHex, msgHashHex) => {
     const sigBytes = secp256k1.sign(hexToBytes(msgHashHex), hexToBytes(privKeyHex));
     const sigObj = secp256k1.Signature.fromBytes(sigBytes);
@@ -220,3 +232,4 @@ export const cryptoUtils = {
     return bytesToHex(schnorr.sign(hexToBytes(msgHashHex), hexToBytes(privKeyHex)));
   }
 };
+
