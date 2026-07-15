@@ -1,4 +1,4 @@
-﻿import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { cryptoUtils, hexToBytes, bytesToHex } from '../utils/crypto';
 import StepCard from './StepCard';
 
@@ -359,37 +359,86 @@ function TransactionJourney() {
       let key = keys.find(k => k.addr === inp.addr);
       const parts = [];
 
+      const isNone = userHashName.includes("SIGHASH_NONE");
+      const isSingle = userHashName.includes("SIGHASH_SINGLE");
+      const isAnyoneCanPay = userHashName.includes("ANYONECANPAY");
+
       if (type === "legacy") {
-        const inputCount = inputs.length.toString(16).padStart(2, '0');
         parts.push({ label: 'Version', value: version, desc: '4 Bytes LE' });
-        parts.push({ label: 'Input Count', value: inputCount, desc: 'VarInt' });
-        preimage = version + inputCount;
-        inputs.forEach((in2, j) => {
-          if (i === j) {
-            const spkLen = (step4[i].spk.length / 2).toString(16).padStart(2, '0');
+        if (isAnyoneCanPay) {
+          parts.push({ label: 'Input Count', value: "01", desc: 'VarInt (ANYONECANPAY)' });
+          preimage = version + "01";
+          const spkLen = (step4[i].spk.length / 2).toString(16).padStart(2, '0');
+          parts.push({ label: `In#${i} TxID`, value: step4[i].txid, desc: '32 Bytes LE' });
+          parts.push({ label: `In#${i} Vout`, value: step4[i].vout, desc: '4 Bytes LE' });
+          parts.push({ label: `In#${i} Script Len`, value: spkLen, desc: 'VarInt' });
+          parts.push({ label: `In#${i} ScriptSig`, value: step4[i].spk, desc: 'Current Input uses its ScriptPubKey' });
+          parts.push({ label: `In#${i} nSequence`, value: step4[i].sequence, desc: '4 Bytes' });
+          preimage += step4[i].txid + step4[i].vout + spkLen + step4[i].spk + step4[i].sequence;
+        } else {
+          const inputCount = inputs.length.toString(16).padStart(2, '0');
+          parts.push({ label: 'Input Count', value: inputCount, desc: 'VarInt' });
+          preimage = version + inputCount;
+          inputs.forEach((in2, j) => {
+            let seq = step4[j].sequence;
+            if (i !== j && (isNone || isSingle)) {
+              seq = "00000000";
+            }
             parts.push({ label: `In#${j} TxID`, value: step4[j].txid, desc: '32 Bytes LE' });
             parts.push({ label: `In#${j} Vout`, value: step4[j].vout, desc: '4 Bytes LE' });
-            parts.push({ label: `In#${j} Script Len`, value: spkLen, desc: 'VarInt' });
-            parts.push({ label: `In#${j} ScriptSig`, value: step4[i].spk, desc: 'Current Input uses its ScriptPubKey' });
-            parts.push({ label: `In#${j} nSequence`, value: step4[j].sequence, desc: '4 Bytes' });
-            preimage += step4[j].txid + step4[j].vout + spkLen + step4[i].spk + step4[j].sequence;
+            if (i === j) {
+              const spkLen = (step4[i].spk.length / 2).toString(16).padStart(2, '0');
+              parts.push({ label: `In#${j} Script Len`, value: spkLen, desc: 'VarInt' });
+              parts.push({ label: `In#${j} ScriptSig`, value: step4[i].spk, desc: 'Current Input uses its ScriptPubKey' });
+              parts.push({ label: `In#${j} nSequence`, value: seq, desc: '4 Bytes' });
+              preimage += step4[j].txid + step4[j].vout + spkLen + step4[i].spk + seq;
+            } else {
+              parts.push({ label: `In#${j} Script Len`, value: "00", desc: 'Empty (00) for other inputs' });
+              parts.push({ label: `In#${j} nSequence`, value: seq, desc: '4 Bytes' });
+              preimage += step4[j].txid + step4[j].vout + "00" + seq;
+            }
+          });
+        }
+
+        if (isNone) {
+          parts.push({ label: 'Output Count', value: "00", desc: 'VarInt (SIGHASH_NONE)' });
+          preimage += "00";
+        } else if (isSingle) {
+          if (i >= outputs.length) {
+            parts.push({ label: 'Output Count', value: "00", desc: 'VarInt (SIGHASH_SINGLE BUG)' });
+            preimage += "00";
           } else {
-            parts.push({ label: `In#${j} TxID`, value: step4[j].txid, desc: '32 Bytes LE' });
-            parts.push({ label: `In#${j} Vout`, value: step4[j].vout, desc: '4 Bytes LE' });
-            parts.push({ label: `In#${j} Script Len`, value: "00", desc: 'Empty (00) for other inputs' });
-            parts.push({ label: `In#${j} nSequence`, value: step4[j].sequence, desc: '4 Bytes' });
-            preimage += step4[j].txid + step4[j].vout + "00" + step4[j].sequence;
+            const outputCount = (i + 1).toString(16).padStart(2, '0');
+            parts.push({ label: 'Output Count', value: outputCount, desc: 'VarInt' });
+            preimage += outputCount;
+            for (let k = 0; k <= i; k++) {
+              if (k < i) {
+                parts.push({ label: `Out#${k} (Empty)`, value: "ffffffffffffffff00", desc: 'Empty output for SIGHASH_SINGLE' });
+                preimage += "ffffffffffffffff00";
+              } else {
+                parts.push({ label: `Out#${k}`, value: step6Vouts[k], desc: 'Selected Output' });
+                preimage += step6Vouts[k];
+              }
+            }
           }
-        });
-        const outputCount = outputs.length.toString(16).padStart(2, '0');
-        parts.push({ label: 'Output Count', value: outputCount, desc: 'VarInt' });
-        parts.push({ label: 'Outputs', value: outputsHex, desc: 'Serialized Outputs' });
+        } else {
+          const outputCount = outputs.length.toString(16).padStart(2, '0');
+          parts.push({ label: 'Output Count', value: outputCount, desc: 'VarInt' });
+          parts.push({ label: 'Outputs', value: outputsHex, desc: 'Serialized Outputs' });
+          preimage += outputCount + outputsHex;
+        }
+
         parts.push({ label: 'Locktime', value: locktime, desc: '4 Bytes LE' });
         parts.push({ label: 'Sighash Type', value: userHashType, desc: '4 Bytes LE' });
+        preimage += locktime + userHashType;
 
-        preimage += outputCount + outputsHex + locktime + userHashType;
-        message = cryptoUtils.doubleSha256(preimage);
+        if (isSingle && i >= outputs.length) {
+          message = "0100000000000000000000000000000000000000000000000000000000000000";
+        } else {
+          message = cryptoUtils.doubleSha256(preimage);
+        }
         if (key) sig = cryptoUtils.sign(key.priv, message) + userHashType.substring(0, 2);
+
       } else if (type === "nested" || type === "native") {
         const outpoint = step4[i].txid + step4[i].vout;
         const pubKeyHash = cryptoUtils.hash160(hexToBytes(key?.pub || ""));
@@ -397,37 +446,96 @@ function TransactionJourney() {
         const inputAmount = inp.value || 0;
         const amountLE = cryptoUtils.toLittleEndian(inputAmount, 8);
 
+        let localHashPrevouts = hashPrevouts;
+        let localHashSequence = hashSequence;
+        let localHashOutputs = hashOutputs;
+        
+        if (isAnyoneCanPay) {
+          localHashPrevouts = "0000000000000000000000000000000000000000000000000000000000000000";
+          localHashSequence = "0000000000000000000000000000000000000000000000000000000000000000";
+        }
+        
+        if (isNone) {
+          localHashOutputs = "0000000000000000000000000000000000000000000000000000000000000000";
+          if (!isAnyoneCanPay) {
+            localHashSequence = "0000000000000000000000000000000000000000000000000000000000000000";
+          }
+        } else if (isSingle) {
+          if (i < outputs.length) {
+            localHashOutputs = cryptoUtils.doubleSha256(step6Vouts[i]);
+          } else {
+            localHashOutputs = "0000000000000000000000000000000000000000000000000000000000000000";
+          }
+          if (!isAnyoneCanPay) {
+            localHashSequence = "0000000000000000000000000000000000000000000000000000000000000000";
+          }
+        }
+
         parts.push({ label: 'Version', value: version, desc: '4 Bytes LE' });
-        parts.push({ label: 'HashPrevouts', value: hashPrevouts, desc: 'Double SHA-256 of all outpoints' });
-        parts.push({ label: 'HashSequence', value: hashSequence, desc: 'Double SHA-256 of all nSequences' });
+        parts.push({ label: 'HashPrevouts', value: localHashPrevouts, desc: isAnyoneCanPay ? 'Zeroed (ANYONECANPAY)' : 'Double SHA-256 of all outpoints' });
+        parts.push({ label: 'HashSequence', value: localHashSequence, desc: (isNone || isSingle) && !isAnyoneCanPay ? 'Zeroed (SIGHASH_NONE/SINGLE)' : (isAnyoneCanPay ? 'Zeroed (ANYONECANPAY)' : 'Double SHA-256 of all nSequences') });
         parts.push({ label: 'Outpoint', value: outpoint, desc: 'Current Input TxID + Vout' });
         parts.push({ label: 'ScriptCode Len', value: "19", desc: 'Length of ScriptCode' });
         parts.push({ label: 'ScriptCode', value: scriptCode.substring(2), desc: 'P2PKH of this input' });
         parts.push({ label: 'Amount', value: amountLE, desc: '8 Bytes LE from the selected UTXO' });
         parts.push({ label: 'nSequence', value: step4[i].sequence, desc: '4 Bytes' });
-        parts.push({ label: 'HashOutputs', value: hashOutputs, desc: 'Double SHA-256 of all outputs' });
+        parts.push({ label: 'HashOutputs', value: localHashOutputs, desc: isNone ? 'Zeroed (SIGHASH_NONE)' : (isSingle ? 'Double SHA-256 of ONE output' : 'Double SHA-256 of all outputs') });
         parts.push({ label: 'Locktime', value: locktime, desc: '4 Bytes LE' });
         parts.push({ label: 'Sighash Type', value: userHashType, desc: '4 Bytes LE' });
 
-        preimage = version + hashPrevouts + hashSequence + outpoint + scriptCode + amountLE + step4[i].sequence + hashOutputs + locktime + userHashType;
+        preimage = version + localHashPrevouts + localHashSequence + outpoint + scriptCode + amountLE + step4[i].sequence + localHashOutputs + locktime + userHashType;
         message = cryptoUtils.doubleSha256(preimage);
         if (key) sig = cryptoUtils.sign(key.priv, message) + userHashType.substring(0, 2);
+
       } else if (type === "taproot") {
         const inputIndexHex = cryptoUtils.toLittleEndian(i, 4);
-
         parts.push({ label: 'Epoch', value: "00", desc: 'Always 00 for Taproot' });
-        parts.push({ label: 'Sighash Type', value: userHashType, desc: '1 Byte (00 for Default)' });
+        parts.push({ label: 'Sighash Type', value: userHashType, desc: '1 Byte' });
         parts.push({ label: 'Version', value: version, desc: '4 Bytes LE' });
         parts.push({ label: 'Locktime', value: locktime, desc: '4 Bytes LE' });
-        parts.push({ label: 'HashPrevouts', value: hashPrevoutsTaproot, desc: 'SHA-256 of all outpoints' });
-        parts.push({ label: 'HashAmounts', value: hashAmountsTaproot, desc: 'SHA-256 of all amounts' });
-        parts.push({ label: 'HashScriptPubKeys', value: hashSpksTaproot, desc: 'SHA-256 of all SPKs' });
-        parts.push({ label: 'HashSequence', value: hashSequenceTaproot, desc: 'SHA-256 of all nSequences' });
-        parts.push({ label: 'HashOutputs', value: hashOutputsTaproot, desc: 'SHA-256 of all outputs' });
-        parts.push({ label: 'Spend Type / Ext', value: "00", desc: 'Key Path (00) + No Annex / No Extensions' });
-        parts.push({ label: 'Input Index', value: inputIndexHex, desc: '4 Bytes LE' });
+        
+        preimage = "00" + userHashType + version + locktime;
 
-        preimage = "00" + userHashType + version + locktime + hashPrevoutsTaproot + hashAmountsTaproot + hashSpksTaproot + hashSequenceTaproot + hashOutputsTaproot + "00" + inputIndexHex;
+        if (!isAnyoneCanPay) {
+          parts.push({ label: 'HashPrevouts', value: hashPrevoutsTaproot, desc: 'SHA-256 of all outpoints' });
+          parts.push({ label: 'HashAmounts', value: hashAmountsTaproot, desc: 'SHA-256 of all amounts' });
+          parts.push({ label: 'HashScriptPubKeys', value: hashSpksTaproot, desc: 'SHA-256 of all SPKs' });
+          parts.push({ label: 'HashSequence', value: hashSequenceTaproot, desc: 'SHA-256 of all nSequences' });
+          preimage += hashPrevoutsTaproot + hashAmountsTaproot + hashSpksTaproot + hashSequenceTaproot;
+        }
+
+        if (!isNone && !isSingle) {
+          parts.push({ label: 'HashOutputs', value: hashOutputsTaproot, desc: 'SHA-256 of all outputs' });
+          preimage += hashOutputsTaproot;
+        } else if (isSingle && i < outputs.length) {
+          const localHashOutputsTaproot = cryptoUtils.sha256(step6Vouts[i]);
+          parts.push({ label: 'HashOutputs', value: localHashOutputsTaproot, desc: 'SHA-256 of ONE output' });
+          preimage += localHashOutputsTaproot;
+        }
+
+        parts.push({ label: 'Spend Type / Ext', value: "00", desc: 'Key Path (00) + No Annex / No Extensions' });
+        preimage += "00";
+
+        if (isAnyoneCanPay) {
+          const outpoint = step4[i].txid + step4[i].vout;
+          parts.push({ label: 'Outpoint', value: outpoint, desc: 'TxID + Vout' });
+          
+          const inputAmount = inp.value || 0;
+          const amountLE = cryptoUtils.toLittleEndian(inputAmount, 8);
+          parts.push({ label: 'Amount', value: amountLE, desc: '8 Bytes LE' });
+          
+          const spk = getScriptPubKey(inp.addr);
+          const spkLen = (spk.length / 2).toString(16).padStart(2, '0');
+          parts.push({ label: 'ScriptPubKey', value: spkLen + spk, desc: 'VarInt + SPK' });
+          
+          parts.push({ label: 'nSequence', value: step4[i].sequence, desc: '4 Bytes' });
+          
+          preimage += outpoint + amountLE + spkLen + spk + step4[i].sequence;
+        } else {
+          parts.push({ label: 'Input Index', value: inputIndexHex, desc: '4 Bytes LE' });
+          preimage += inputIndexHex;
+        }
+
         message = cryptoUtils.taggedHash("TapSighash", hexToBytes(preimage));
         const tweakedPriv = deriveTaprootTweakedPriv(key?.priv || "", key?.pub || "");
         if (tweakedPriv) sig = cryptoUtils.schnorrSign(tweakedPriv, message);
